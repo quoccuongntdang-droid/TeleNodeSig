@@ -33,14 +33,14 @@ const steps = [
 
 const sessions = {};
 
-// Tạo nút bấm cố định nằm ngay dưới ô nhập tin nhắn để gọi nhanh
+// Bàn phím nút bấm cố định dưới ô chat
 const persistentKeyboard = Markup.keyboard([
     ['🚀 Bắt Đầu Báo Cáo Nhanh']
 ]).resize();
 
-// Khi gõ /start hoặc mở bot lần đầu
+// Khi gõ /start
 bot.start((ctx) => {
-    ctx.reply('Chào Cường! Bấm nút bên dưới để bắt đầu báo cáo và tự gõ số:', persistentKeyboard);
+    ctx.reply('Chào Cường! Bấm nút bên dưới để bắt đầu báo cáo:', persistentKeyboard);
 });
 
 // Bắt sự kiện khi bấm nút cố định hoặc gõ /nhacnho
@@ -54,39 +54,30 @@ bot.command('nhacnho', (ctx) => {
 
 async function startReportSession(ctx) {
     const chatId = ctx.chat.id;
-    sessions[chatId] = { step: 0, data: {}, lastTime: 0 };
-    await ctx.reply(`🚀 **BÁO CÁO NHANH (TỰ GÕ)**\nNhập số cho mục:\n\n👉 **${steps[0].label}:**`, persistentKeyboard);
+    sessions[chatId] = { step: 0, data: {} };
+    await ctx.reply(`🚀 **BÁO CÁO NHANH**\nNhập số cho mục:\n\n👉 **${steps[0].label}:**`, persistentKeyboard);
 }
 
-// Lắng nghe khi bạn tự gõ phím gửi lên
+// Lắng nghe tin nhắn văn bản bạn tự gõ
 bot.on('text', async (ctx) => {
     const chatId = ctx.chat.id;
     const text = ctx.message.text;
 
-    // Bỏ qua nếu là lệnh hoặc nút bấm khởi động
+    // Bỏ qua lệnh hoặc nút bấm khởi động
     if (text.startsWith('/') || text === '🚀 Bắt Đầu Báo Cáo Nhanh') return;
 
     let session = sessions[chatId];
 
-    // Nếu chưa bấm bắt đầu mà tự gõ, bot sẽ nhắc nhở bấm nút
     if (!session) {
         if (text.includes('🌟MYPAGE🌟')) {
             await sendToSignal(ctx, text);
             return;
         }
-        await ctx.reply('Cường ơi, hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** phía dưới trước khi gõ nhé!', persistentKeyboard);
+        await ctx.reply('Cường ơi, hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** phía dưới trước nhé!', persistentKeyboard);
         return;
     }
 
-    // Chống gõ quá nhanh (tối thiểu cách nhau 0.8 giây để tránh lệch bước)
-    const now = Date.now();
-    if (now - session.lastTime < 800) {
-        await ctx.reply(`⚠️ Gõ từ từ thôi Cường ơi, bot chưa theo kịp kìa! Nhập lại số cho mục hiện tại nhé.`);
-        return;
-    }
-    session.lastTime = now;
-
-    // Lưu giá trị bạn vừa gõ
+    // Lưu dữ liệu bước hiện tại
     const currentStep = steps[session.step];
     session.data[currentStep.key] = text;
     session.step++;
@@ -116,4 +107,4 @@ bot.on('text', async (ctx) => {
 });
 
 bot.launch();
-console.log('Bot tự gõ phím đang chạy...');
+console.log('Bot đang chạy ổn định...');
