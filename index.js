@@ -1,13 +1,14 @@
 const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const express = require('express');
+const cron = require('node-cron');
 
 // Khởi tạo HTTP Server giả lập cho Render
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('Bot Telegram đang chạy ngầm 24/7 ổn định!');
+    res.send('Bot Telegram nhắc nhở đang chạy ngầm 24/7!');
 });
 
 app.listen(PORT, () => {
@@ -16,6 +17,10 @@ app.listen(PORT, () => {
 
 // Khởi tạo bot
 const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
+
+// Lưu ID chat cá nhân của bạn để bot biết đường gửi tin nhắn định giờ
+// (Sau khi bạn nhắn /start cho bot lần đầu, ID này sẽ được lưu lại tự động)
+let savedChatId = null; 
 
 // Danh sách các bước báo cáo
 const steps = [
@@ -40,15 +45,18 @@ const persistentKeyboard = Markup.keyboard([
 
 // Khi gõ /start
 bot.start((ctx) => {
-    ctx.reply('Chào Cường! Bấm nút bên dưới để bắt đầu báo cáo:', persistentKeyboard);
+    savedChatId = ctx.chat.id; // Lưu lại ID của bạn
+    ctx.reply('Chào Cường! Bot đã ghi nhận và sẽ tự động nhắc nhở bạn báo cáo vào lúc 21:00 hằng ngày nhé!', persistentKeyboard);
 });
 
 // Bắt sự kiện khi bấm nút cố định hoặc gõ /nhacnho
 bot.hears('🚀 Bắt Đầu Báo Cáo Nhanh', (ctx) => {
+    savedChatId = ctx.chat.id;
     startReportSession(ctx);
 });
 
 bot.command('nhacnho', (ctx) => {
+    savedChatId = ctx.chat.id;
     startReportSession(ctx);
 });
 
@@ -58,9 +66,32 @@ async function startReportSession(ctx) {
     await ctx.reply(`🚀 **BÁO CÁO NHANH**\nNhập số cho mục:\n\n👉 **${steps[0].label}:**`, persistentKeyboard);
 }
 
+// --- LẬP LỊCH TỰ ĐỘNG NHẮC NHỞ LÚC 21:00 (9 GIỜ TỐI) HẰNG NGÀY ---
+// Cú pháp cron: '0 21 * * *' nghĩa là phút thứ 0, giờ 21 (9h tối) mỗi ngày
+cron.schedule('0 21 * * *', async () => {
+    if (savedChatId) {
+        try {
+            await bot.telegram.sendMessage(
+                savedChatId, 
+                '⏰ **Đến giờ báo cáo rồi Cường ơi!** Hãy bấm nút bên dưới để bắt đầu gửi số liệu nhé:', 
+                persistentKeyboard
+            );
+            console.log('Đã gửi tin nhắn nhắc nhở lúc 21:00 cho Cường.');
+        } catch (error) {
+            console.error('Lỗi gửi tin nhắn định giờ:', error.message);
+        }
+    } else {
+        console.log('Chưa có Chat ID để gửi nhắc nhở (Bạn cần gõ /start cho bot ít nhất 1 lần).');
+    }
+}, {
+    timezone: "Asia/Ho_Chi_Minh" // Đảm bảo đúng múi giờ Việt Nam
+});
+// -------------------------------------------------------------
+
 // Lắng nghe tin nhắn văn bản bạn tự gõ
 bot.on('text', async (ctx) => {
     const chatId = ctx.chat.id;
+    savedChatId = chatId; // Cập nhật chat ID mới nhất
     const text = ctx.message.text;
 
     if (text.startsWith('/') || text === '🚀 Bắt Đầu Báo Cáo Nhanh') return;
@@ -76,7 +107,6 @@ bot.on('text', async (ctx) => {
         return;
     }
 
-    // Lưu dữ liệu bước hiện tại
     const currentStep = steps[session.step];
     session.data[currentStep.key] = text;
     session.step++;
@@ -90,15 +120,12 @@ bot.on('text', async (ctx) => {
 
         await ctx.reply(`📋 **ĐÃ TỔNG HỢP XONG:**\n\n${finalReport}\n\n⏳ Đang gửi sang Signal...`, persistentKeyboard);
         
-        // --- TỰ ĐỘNG LẤY NGÀY THÁNG NĂM HÔM NAY ---
+        // Tự động lấy ngày tháng năm hôm nay
         const today = new Date();
         const dd = String(today.getDate()).padStart(2, '0');
         const mm = String(today.getMonth() + 1).padStart(2, '0');
         const yyyy = today.getFullYear();
-        const currentDateStr = `${dd}/${mm}/${yyyy}`;
-
-        // Tiêu đề mới theo yêu cầu: CPN KVT - Ngày DD/MM/YYYY
-        const customHeader = `CPN KVT - Ngày ${currentDateStr}`;
+        const customHeader = `CPN KVT - Ngày ${dd}/${mm}/${yyyy}`;
 
         try {
             const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
@@ -116,4 +143,4 @@ bot.on('text', async (ctx) => {
 });
 
 bot.launch();
-console.log('Bot đang chạy ổn định...');
+console.log('Bot nhắc nhở 21:00 hằng ngày đang chạy ổn định...');
