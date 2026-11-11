@@ -1,4 +1,4 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const express = require('express');
 
@@ -17,88 +17,103 @@ app.listen(PORT, () => {
 // Khởi tạo bot
 const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
 
-const userSessions = {};
-
+// Danh sách các bước báo cáo
 const steps = [
-    { key: 'tinNguong', label: '🔰Đánh Giá Tín Ngưỡng' },
-    { key: 'kinhThanh', label: '🔰Kinh thánh' },
-    { key: 'sachLT', label: '🔰Sách LT' },
-    { key: 'tapGd', label: '🔰Tập Gđ' },
-    { key: 'baiMoi', label: '🔰Bài mới (Phát biểu)' },
-    { key: 'baiCu', label: '🔰Bài cũ (Phát biểu)' },
-    { key: 'edu', label: '🔰EDU (Phát biểu)' },
-    { key: 'donThuan', label: '🔰Đơn Thuần (Truda)' },
-    { key: 'huuHieu', label: '🔰Hữu Hiệu (Truda)' },
-    { key: 'ketTrai', label: '🔰Kết trái (Truda)' }
+    { key: 'tinNguong', label: '🔰 Đánh Giá Tín Ngưỡng' },
+    { key: 'kinhThanh', label: '🔰 Kinh thánh' },
+    { key: 'sachLT', label: '🔰 Sách LT' },
+    { key: 'tapGd', label: '🔰 Tập Gđ' },
+    { key: 'baiMoi', label: '🔰 Bài mới (Phát biểu)' },
+    { key: 'baiCu', label: '🔰 Bài cũ (Phát biểu)' },
+    { key: 'edu', label: '🔰 EDU (Phát biểu)' },
+    { key: 'donThuan', label: '🔰 Đơn Thuần (Truda)' },
+    { key: 'huuHieu', label: '🔰 Hữu Hiệu (Truda)' },
+    { key: 'ketTrai', label: '🔰 Kết trái (Truda)' }
 ];
 
-bot.command('nhacnho', (ctx) => {
-    const chatId = ctx.chat.id;
-    // Khởi tạo phiên kèm mốc thời gian ban đầu
-    userSessions[chatId] = { stepIndex: 0, data: {}, lastTime: 0 };
-    ctx.reply(`🚀 **BẮT ĐẦU BÁO CÁO NHANH**\nNhập số cho mục sau:\n\n👉 **${steps[0].label}:**`);
+const sessions = {};
+
+// Tạo nút bấm cố định nằm ngay dưới ô nhập tin nhắn để gọi nhanh
+const persistentKeyboard = Markup.keyboard([
+    ['🚀 Bắt Đầu Báo Cáo Nhanh']
+]).resize();
+
+// Khi gõ /start hoặc mở bot lần đầu
+bot.start((ctx) => {
+    ctx.reply('Chào Cường! Bấm nút bên dưới để bắt đầu báo cáo và tự gõ số:', persistentKeyboard);
 });
 
+// Bắt sự kiện khi bấm nút cố định hoặc gõ /nhacnho
+bot.hears('🚀 Bắt Đầu Báo Cáo Nhanh', (ctx) => {
+    startReportSession(ctx);
+});
+
+bot.command('nhacnho', (ctx) => {
+    startReportSession(ctx);
+});
+
+async function startReportSession(ctx) {
+    const chatId = ctx.chat.id;
+    sessions[chatId] = { step: 0, data: {}, lastTime: 0 };
+    await ctx.reply(`🚀 **BÁO CÁO NHANH (TỰ GÕ)**\nNhập số cho mục:\n\n👉 **${steps[0].label}:**`, persistentKeyboard);
+}
+
+// Lắng nghe khi bạn tự gõ phím gửi lên
 bot.on('text', async (ctx) => {
     const chatId = ctx.chat.id;
     const text = ctx.message.text;
 
-    if (text.startsWith('/')) return; // Bỏ qua nếu là lệnh khác
+    // Bỏ qua nếu là lệnh hoặc nút bấm khởi động
+    if (text.startsWith('/') || text === '🚀 Bắt Đầu Báo Cáo Nhanh') return;
 
-    let session = userSessions[chatId];
+    let session = sessions[chatId];
 
-    // Nếu bot quên session, tự động khởi tạo lại từ đầu
+    // Nếu chưa bấm bắt đầu mà tự gõ, bot sẽ nhắc nhở bấm nút
     if (!session) {
         if (text.includes('🌟MYPAGE🌟')) {
             await sendToSignal(ctx, text);
             return;
         }
-        session = { stepIndex: 0, data: {}, lastTime: 0 };
-        userSessions[chatId] = session;
+        await ctx.reply('Cường ơi, hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** phía dưới trước khi gõ nhé!', persistentKeyboard);
+        return;
     }
 
-    // --- KIỂM TRA TỐC ĐỘ GÕ (CHỐNG NHẬP QUÁ NHANH) ---
+    // Chống gõ quá nhanh (tối thiểu cách nhau 0.8 giây để tránh lệch bước)
     const now = Date.now();
-    const TIME_LIMIT = 1000; // Giới hạn thời gian tối thiểu giữa 2 lần gửi là 1 giây (1000ms)
-    
-    if (session.lastTime && (now - session.lastTime < TIME_LIMIT)) {
-        await ctx.reply(`⚠️ **Cường ơi, bạn đang nhập quá nhanh!** Hãy đợi một nhịp rồi hãy gửi tiếp nhé.`);
-        return; // Dừng lại, không tính bước này để tránh lệch dữ liệu
+    if (now - session.lastTime < 800) {
+        await ctx.reply(`⚠️ Gõ từ từ thôi Cường ơi, bot chưa theo kịp kìa! Nhập lại số cho mục hiện tại nhé.`);
+        return;
     }
-    // Cập nhật lại mốc thời gian của tin nhắn hợp lệ gần nhất
     session.lastTime = now;
-    // --------------------------------------------------
 
-    const currentStep = steps[session.stepIndex];
+    // Lưu giá trị bạn vừa gõ
+    const currentStep = steps[session.step];
     session.data[currentStep.key] = text;
-    session.stepIndex++;
+    session.step++;
 
-    if (session.stepIndex < steps.length) {
-        const nextStep = steps[session.stepIndex];
-        await ctx.reply(`👉 **${nextStep.label}:**`);
+    if (session.step < steps.length) {
+        const nextStep = steps[session.step];
+        await ctx.reply(`👉 **${nextStep.label}:**`, persistentKeyboard);
     } else {
         const d = session.data;
         const finalReport = `🌟MYPAGE🌟\n🔰Đánh Giá Tín Ngưỡng: ${d.tinNguong}\n🔰Kinh thánh: ${d.kinhThanh}\n🔰Sách LT: ${d.sachLT}\n🔰Tập Gđ: ${d.tapGd}\n🎊PHÁT BIỂU🎉\n🔰Bài mới: ${d.baiMoi}\n🔰Bài cũ: ${d.baiCu}\n🔰EDU: ${d.edu}\n🔥TRUDA🔥\n🔰Đơn Thuần: ${d.donThuan}\n🔰Hữu Hiệu: ${d.huuHieu}\n🔰Kết trái: ${d.ketTrai}`;
 
-        await ctx.reply(`📋 **ĐÃ TỔNG HỢP XONG:**\n\n${finalReport}\n\n⏳ Đang gửi sang Signal...`);
-        await sendToSignal(ctx, finalReport);
-        delete userSessions[chatId];
+        await ctx.reply(`📋 **ĐÃ TỔNG HỢP XONG:**\n\n${finalReport}\n\n⏳ Đang gửi sang Signal...`, persistentKeyboard);
+        
+        try {
+            const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
+            const apikey = '911098';
+            const url = `https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(`[Báo cáo từ Telegram]\n\n${finalReport}`)}`;
+            
+            await axios.get(url);
+            await ctx.reply('✅ **Đã gửi báo cáo thành công sang Signal!**', persistentKeyboard);
+        } catch (error) {
+            console.error('Lỗi gửi Signal:', error.message);
+            await ctx.reply('❌ Gửi sang Signal thất bại.', persistentKeyboard);
+        }
+        delete sessions[chatId];
     }
 });
 
-async function sendToSignal(ctx, reportText) {
-    try {
-        const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
-        const apikey = '911098';
-        const url = `https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(`[Báo cáo từ Telegram]\n\n${reportText}`)}`;
-        
-        await axios.get(url);
-        await ctx.reply('✅ **Đã gửi báo cáo thành công sang Signal!**');
-    } catch (error) {
-        console.error('Lỗi gửi Signal:', error.message);
-        await ctx.reply('❌ Gửi sang Signal thất bại.');
-    }
-}
-
 bot.launch();
-console.log('Bot báo cáo chống spam tốc độ đang chạy...');
+console.log('Bot tự gõ phím đang chạy...');
