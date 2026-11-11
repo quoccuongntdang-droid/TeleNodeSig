@@ -1,9 +1,21 @@
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
+const express = require('express'); // Thêm thư viện express để mở cổng HTTP ảo cho Render
+
+// Khởi tạo HTTP Server giả lập để vượt qua lỗi Port timeout của Render
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Bot Telegram đang chạy ngầm 24/7 ổn định!');
+});
+
+app.listen(PORT, () => {
+    console.log(`HTTP Server đang lắng nghe trên cổng ${PORT}`);
+});
 
 // Thay Token Telegram Bot của bạn vào đây
 const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
-
 
 // Mẫu form báo cáo của bạn
 const reportFormTemplate = `🌟MYPAGE🌟
@@ -34,7 +46,7 @@ bot.on('text', async (ctx) => {
         ctx.reply('⏳ Đang xử lý và chuyển tiếp báo cáo...');
 
         try {
-            // Tích hợp gửi sang Signal (Dùng CallMeBot hoặc API Signal của bạn)
+            // Tích hợp gửi sang Signal (Dùng CallMeBot)
             const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
             const apikey = '911098';
             const url = `https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(`[Báo cáo từ Telegram]\n\n${userMessage}`)}`;
