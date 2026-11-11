@@ -63,7 +63,6 @@ bot.on('text', async (ctx) => {
     const chatId = ctx.chat.id;
     const text = ctx.message.text;
 
-    // Bỏ qua lệnh hoặc nút bấm khởi động
     if (text.startsWith('/') || text === '🚀 Bắt Đầu Báo Cáo Nhanh') return;
 
     let session = sessions[chatId];
@@ -91,10 +90,20 @@ bot.on('text', async (ctx) => {
 
         await ctx.reply(`📋 **ĐÃ TỔNG HỢP XONG:**\n\n${finalReport}\n\n⏳ Đang gửi sang Signal...`, persistentKeyboard);
         
+        // --- TỰ ĐỘNG LẤY NGÀY THÁNG NĂM HÔM NAY ---
+        const today = new Date();
+        const dd = String(today.getDate()).padStart(2, '0');
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const yyyy = today.getFullYear();
+        const currentDateStr = `${dd}/${mm}/${yyyy}`;
+
+        // Tiêu đề mới theo yêu cầu: CPN KVT - Ngày DD/MM/YYYY
+        const customHeader = `CPN KVT - Ngày ${currentDateStr}`;
+
         try {
             const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
             const apikey = '911098';
-            const url = `https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(`[Báo cáo từ Telegram]\n\n${finalReport}`)}`;
+            const url = `https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(`${customHeader}\n\n${finalReport}`)}`;
             
             await axios.get(url);
             await ctx.reply('✅ **Đã gửi báo cáo thành công sang Signal!**', persistentKeyboard);
