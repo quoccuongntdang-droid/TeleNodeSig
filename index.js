@@ -2,7 +2,8 @@ const { Telegraf } = require('telegraf');
 const axios = require('axios');
 
 // Thay Token Telegram Bot của bạn vào đây
-const bot = new Telegraf('YOUR_TELEGRAM_BOT_TOKEN');
+const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
+
 
 // Mẫu form báo cáo của bạn
 const reportFormTemplate = `🌟MYPAGE🌟
@@ -34,8 +35,8 @@ bot.on('text', async (ctx) => {
 
         try {
             // Tích hợp gửi sang Signal (Dùng CallMeBot hoặc API Signal của bạn)
-            const phone = '+84_SỐ_ĐIỆN_THOẠI_CỦA_SẾP'; 
-            const apikey = 'YOUR_CALLMEBOT_APIKEY';
+            const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
+            const apikey = '911098';
             const url = `https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(`[Báo cáo từ Telegram]\n\n${userMessage}`)}`;
             
             await axios.get(url);
@@ -54,4 +55,3 @@ bot.on('text', async (ctx) => {
 // Khởi chạy bot
 bot.launch();
 console.log('Bot đang chạy...');
-
