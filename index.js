@@ -256,7 +256,7 @@ app.post('/auth-forgot', (req, res) => {
     }
 });
 
-// --- TRANG CHỦ: DASHBOARD QUẢN LÝ RIÊNG TỪNG USER (ĐÃ BỎ NÚT FLASHCARD) ---
+// --- TRANG CHỦ: DASHBOARD QUẢN LÝ RIÊNG TỪNG USER ---
 app.get('/', (req, res) => {
     const username = req.query.user;
     if (!username) return res.redirect('/login');
