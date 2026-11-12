@@ -256,7 +256,7 @@ app.post('/auth-forgot', (req, res) => {
     }
 });
 
-// --- TRANG CHỦ: DASHBOARD QUẢN LÝ RIÊNG TỪNG USER ---
+// --- TRANG CHỦ: DASHBOARD QUẢN LÝ RIÊNG TỪNG USER (ĐÃ BỎ NÚT FLASHCARD) ---
 app.get('/', (req, res) => {
     const username = req.query.user;
     if (!username) return res.redirect('/login');
@@ -289,8 +289,6 @@ app.get('/', (req, res) => {
                 h2, h3 { text-align: center; color: #2c3e50; }
                 .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 14px; background: #ecf0f1; padding: 10px; border-radius: 8px; }
                 .top-bar a { color: #c0392b; text-decoration: none; font-weight: bold; }
-                .menu-link { display: block; background: #2980b9; color: white; text-align: center; padding: 12px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-bottom: 20px; }
-                .menu-link:hover { background: #1f618d; }
                 .section-title { background: #34495e; color: white; padding: 8px 12px; border-radius: 6px; margin-top: 20px; font-size: 15px; }
                 .form-group { margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
                 label { font-size: 14px; color: #333; flex: 2; }
@@ -310,7 +308,6 @@ app.get('/', (req, res) => {
                     <a href="/login">Đăng xuất</a>
                 </div>
                 <h2>🚀 Quản Lý Chiến Dịch</h2>
-                <a href="/flashcard" class="menu-link">📖 Mở App Flashcard Ôn Tập Kinh Thánh</a>
                 
                 <div class="stats-box">
                     🏆 Tổng điểm tích lũy cá nhân: <b style="color: #27ae60; font-size: 18px;">${cumulativeScore} điểm</b>
@@ -349,115 +346,6 @@ app.get('/', (req, res) => {
                     </tbody>
                 </table>
             </div>
-        </body>
-        </html>
-    `);
-});
-
-// --- TRANG FLASHCARD ÔN TẬP KINH THÁNH ---
-app.get('/flashcard', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head>
-            <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Flashcard Ôn Tập Kinh Thánh</title>
-            <style>
-                body { font-family: Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }
-                .container { max-width: 450px; width: 100%; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); box-sizing: border-box; }
-                h2 { text-align: center; color: #2c3e50; margin-bottom: 15px; font-size: 20px; }
-                .back-home { display: block; text-align: center; margin-bottom: 15px; color: #2980b9; text-decoration: none; font-weight: bold; font-size: 14px; }
-                .controls { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
-                select, button { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 15px; box-sizing: border-box; }
-                .btn-random { background: #e67e22; color: white; border: none; font-weight: bold; cursor: pointer; }
-                .flashcard-container { perspective: 1000px; width: 100%; height: 260px; margin-bottom: 20px; cursor: pointer; }
-                .flashcard { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 0.6s; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
-                .flashcard.flipped { transform: rotateY(180deg); }
-                .card-face { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; border-radius: 12px; text-align: center; }
-                .card-front { background: #ffffff; border: 2px solid #3498db; color: #2c3e50; }
-                .card-back { background: #ebf5fb; border: 2px solid #2980b9; color: #1b4f72; transform: rotateY(180deg); }
-                .card-title { font-size: 13px; color: #7f8c8d; margin-bottom: 8px; text-transform: uppercase; font-weight: bold; }
-                .card-ref { font-size: 22px; font-weight: bold; color: #2980b9; }
-                .card-text { font-size: 16px; line-height: 1.5; }
-                .hint { font-size: 12px; color: #95a5a6; margin-top: 15px; font-style: italic; }
-                .nav-buttons { display: flex; gap: 10px; }
-                .btn-nav { flex: 1; background: #27ae60; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; }
-                .progress { text-align: center; margin-top: 15px; font-size: 14px; color: #555; font-weight: bold; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <a href="/login" class="back-home">⬅️ Trở về trang Đăng Nhập</a>
-                <h2>📖 Ôn Tập Kinh Thánh</h2>
-                <div class="controls">
-                    <select id="lessonSelect" onchange="changeLesson()"></select>
-                    <button class="btn-random" onclick="selectRandomLesson()">🎲 Chọn Bài Ngẫu Nhiên</button>
-                </div>
-                <div class="flashcard-container" onclick="flipCard()">
-                    <div class="flashcard" id="card">
-                        <div class="card-face card-front">
-                            <div class="card-title" id="frontLessonTitle">Đang tải...</div>
-                            <div class="card-ref" id="frontRef">...</div>
-                            <div class="hint">(Chạm vào thẻ để lật xem nội dung)</div>
-                        </div>
-                        <div class="card-face card-back">
-                            <div class="card-title">Nội Dung Kinh Thánh</div>
-                            <div class="card-text" id="backText">...</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="nav-buttons">
-                    <button class="btn-nav" onclick="prevVerse()">⬅️ Câu Trước</button>
-                    <button class="btn-nav" onclick="nextVerse()">Câu Sau ➡️</button>
-                </div>
-                <div class="progress" id="progressText">Bài 1 / Câu 1</div>
-            </div>
-            <script>
-                const bibleData = [
-                    { id: 1, title: "1-1. Mầu nhiệm về sự tha tội và Đấng An Sang Hồng", verses: [{ ref: "Sáng Thế Ký 2:7", text: "Đức Chúa Trời lấy bụi đất nắn nên hình người..." }, { ref: "Truyền Đạo 12:7", text: "Và bụi tro trở đất y như nguyên cũ..." }] },
-                    { id: 2, title: "1-2. Đấng Cứu Chúa theo mỗi thời đại và danh mới", verses: [{ ref: "Công Vụ Các Sứ Tồ 4:12", text: "Chẳng có sự cứu rỗi trong đấng nào khác..." }] }
-                ];
-                let currentLessonIndex = 0, currentVerseIndex = 0, isFlipped = false;
-                function initApp() {
-                    const select = document.getElementById('lessonSelect');
-                    bibleData.forEach((lesson, index) => {
-                        let opt = document.createElement('option');
-                        opt.value = index; opt.textContent = lesson.title;
-                        select.appendChild(opt);
-                    });
-                    loadCard();
-                }
-                function loadCard() {
-                    const lesson = bibleData[currentLessonIndex];
-                    const verse = lesson.verses[currentVerseIndex];
-                    document.getElementById('frontLessonTitle').textContent = lesson.title;
-                    document.getElementById('frontRef').textContent = verse.ref;
-                    document.getElementById('backText').textContent = verse.text;
-                    document.getElementById('progressText').textContent = \`Bài \${currentLessonIndex + 1} | Câu \${currentVerseIndex + 1} / \${lesson.verses.length}\`;
-                    if(isFlipped) flipCard();
-                }
-                function flipCard() { document.getElementById('card').classList.toggle('flipped'); isFlipped = !isFlipped; }
-                function nextVerse() {
-                    const lesson = bibleData[currentLessonIndex];
-                    currentVerseIndex = (currentVerseIndex < lesson.verses.length - 1) ? currentVerseIndex + 1 : 0;
-                    loadCard();
-                }
-                function prevVerse() {
-                    const lesson = bibleData[currentLessonIndex];
-                    currentVerseIndex = (currentVerseIndex > 0) ? currentVerseIndex - 1 : lesson.verses.length - 1;
-                    loadCard();
-                }
-                function changeLesson() {
-                    currentLessonIndex = parseInt(document.getElementById('lessonSelect').value);
-                    currentVerseIndex = 0; loadCard();
-                }
-                function selectRandomLesson() {
-                    currentLessonIndex = Math.floor(Math.random() * bibleData.length);
-                    document.getElementById('lessonSelect').value = currentLessonIndex;
-                    currentVerseIndex = 0; loadCard();
-                }
-                window.onload = initApp;
-            </script>
         </body>
         </html>
     `);
