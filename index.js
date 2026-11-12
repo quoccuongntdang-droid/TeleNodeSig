@@ -11,33 +11,58 @@ const PORT = process.env.PORT || 3000;
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-const HISTORY_FILE = path.join(__dirname, 'history.json');
+const USERS_FILE = path.join(__dirname, 'users.json');
 const PHONE = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
 const APIKEY = '911098';
 
-function loadHistory() {
+// --- QUẢN LÝ USER & DỮ LIỆU RIÊNG BIỆT ---
+function loadUsers() {
     try {
-        if (fs.existsSync(HISTORY_FILE)) {
-            const data = fs.readFileSync(HISTORY_FILE, 'utf8');
-            return JSON.parse(data);
+        if (fs.existsSync(USERS_FILE)) {
+            return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
         }
     } catch (e) {
-        console.error('Lỗi đọc lịch sử:', e.message);
+        console.error('Lỗi đọc users.json:', e.message);
     }
     return [];
 }
 
-function saveHistory(history) {
+function saveUsers(users) {
     try {
-        // Sắp xếp lịch sử theo ngày tháng tăng dần để hiển thị chuẩn
+        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+    } catch (e) {
+        console.error('Lỗi ghi users.json:', e.message);
+    }
+}
+
+function getUserHistoryFile(username) {
+    const safeName = username.replace(/[^a-zA-Z0-9]/g, '_');
+    return path.join(__dirname, `history_${safeName}.json`);
+}
+
+function loadUserHistory(username) {
+    const file = getUserHistoryFile(username);
+    try {
+        if (fs.existsSync(file)) {
+            return JSON.parse(fs.readFileSync(file, 'utf8'));
+        }
+    } catch (e) {
+        console.error('Lỗi đọc lịch sử user:', e.message);
+    }
+    return [];
+}
+
+function saveUserHistory(username, history) {
+    const file = getUserHistoryFile(username);
+    try {
         history.sort((a, b) => {
             const [dA, mA, yA] = a.date.split('/');
             const [dB, mB, yB] = b.date.split('/');
             return new Date(`${yA}-${mA}-${dA}`) - new Date(`${yB}-${mB}-${dB}`);
         });
-        fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2), 'utf8');
+        fs.writeFileSync(file, JSON.stringify(history, null, 2), 'utf8');
     } catch (e) {
-        console.error('Lỗi ghi lịch sử:', e.message);
+        console.error('Lỗi ghi lịch sử user:', e.message);
     }
 }
 
@@ -49,14 +74,13 @@ async function sendToSignal(message) {
     }
 }
 
-// Hàm tính điểm và lưu trữ theo ngày chỉ định
-function calculateScoreAndContent(dateStr, d) {
+function calculateScoreAndContent(username, dateStr, d) {
     const p1 = (Number(d.tinNguong) + Number(d.kinhThanh) + Number(d.sachLT) + Number(d.tapGd)) * 10;
     const p2 = (Number(d.baiMoi) * 100) + (Number(d.baiCu) * 100) + (Number(d.edu) * 40);
     const p3 = (Number(d.donThuan) * 10) + (Number(d.huuHieu) * 100) + (Number(d.ketTrai) * 500);
     const totalDayScore = p1 + p2 + p3;
 
-    let history = loadHistory();
+    let history = loadUserHistory(username);
     const existingIndex = history.findIndex(item => item.date === dateStr);
     
     const dayData = {
@@ -81,7 +105,7 @@ function calculateScoreAndContent(dateStr, d) {
     } else {
         history.push(dayData);
     }
-    saveHistory(history);
+    saveUserHistory(username, history);
 
     const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
     const startDate = new Date('2026-11-01');
@@ -90,18 +114,155 @@ function calculateScoreAndContent(dateStr, d) {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     const progressPercent = Math.min(Math.max((diffDays / 60) * 100, 0), 100).toFixed(1);
 
-    const reportContent = `CPN KVT - Ngày ${dateStr}\n\n🌟MYPAGE🌟\n🔰Đánh Giá Tín Ngưỡng: ${d.tinNguong}\n🔰Kinh thánh: ${d.kinhThanh}\n🔰Sách LT: ${d.sachLT}\n🔰Tập Gđ: ${d.tapGd}\n🎊PHÁT BIỂU🎉\n🔰Bài mới: ${d.baiMoi}\n🔰Bài cũ: ${d.baiCu}\n🔰EDU: ${d.edu}\n🔥TRUDA🔥\n🔰Đơn Thuần: ${d.donThuan}\n🔰Hữu Hiệu: ${d.huuHieu}\n🔰Kết trái: ${d.ketTrai}`;
-    const summaryContent = `📊 **TỔNG KẾT TÍCH LŨY:**\n⭐ Điểm ngày (${dateStr}): **+${totalDayScore} điểm**\n🏆 **Tổng điểm tích lũy:** **${cumulativeScore} điểm**\n📈 Tiến độ 60 ngày: **${progressPercent}%** (Ngày thứ ${diffDays}/60)`;
+    const reportContent = `[${username}] CPN KVT - Ngày ${dateStr}\n\n🌟MYPAGE🌟\n🔰Đánh Giá Tín Ngưỡng: ${d.tinNguong}\n🔰Kinh thánh: ${d.kinhThanh}\n🔰Sách LT: ${d.sachLT}\n🔰Tập Gđ: ${d.tapGd}\n🎊PHÁT BIỂU🎉\n🔰Bài mới: ${d.baiMoi}\n🔰Bài cũ: ${d.baiCu}\n🔰EDU: ${d.edu}\n🔥TRUDA🔥\n🔰Đơn Thuần: ${d.donThuan}\n🔰Hữu Hiệu: ${d.huuHieu}\n🔰Kết trái: ${d.ketTrai}`;
+    const summaryContent = `📊 **[${username}] TỔNG KẾT TÍCH LŨY:**\n⭐ Điểm ngày (${dateStr}): **+${totalDayScore} điểm**\n🏆 **Tổng điểm tích lũy:** **${cumulativeScore} điểm**\n📈 Tiến độ 60 ngày: **${progressPercent}%** (Ngày thứ ${diffDays}/60)`;
 
     return { reportContent, summaryContent };
 }
 
-// --- GIAO DIỆN WEB DASHBOARD (CÓ CHỌN NGÀY NHẬP BÙ) ---
-app.get('/', (req, res) => {
-    const history = loadHistory();
-    const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
+// --- TRANG ĐĂNG NHẬP / ĐĂNG KÝ ---
+app.get('/login', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head>
+            <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Đăng Nhập - Quản Lý Chiến Dịch</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: #f4f6f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 380px; box-sizing: border-box; }
+                h2 { text-align: center; color: #2c3e50; margin-bottom: 20px; }
+                input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+                button { width: 100%; background: #2980b9; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+                button:hover { background: #1f618d; }
+                .links { display: flex; justify-content: space-between; margin-top: 15px; font-size: 13px; }
+                .links a { color: #2980b9; text-decoration: none; }
+                .error { color: #e74c3c; text-align: center; font-size: 13px; margin-bottom: 10px; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h2>🔐 Đăng Nhập Hệ Thống</h2>
+                ${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
+                <form action="/auth-login" method="POST">
+                    <input type="text" name="username" placeholder="Tên đăng nhập" required>
+                    <input type="password" name="password" placeholder="Mật khẩu" required>
+                    <button type="submit">Đăng Nhập</button>
+                </form>
+                <div class="links">
+                    <a href="/register">Đăng ký tài khoản</a>
+                    <a href="/forgot">Quên mật khẩu?</a>
+                </div>
+            </div>
+        </body>
+        </html>
+    `);
+});
 
-    // Lấy ngày hiện tại định dạng YYYY-MM-DD cho ô input date mặc định
+app.post('/auth-login', (req, res) => {
+    const { username, password } = req.body;
+    const users = loadUsers();
+    const user = users.find(u => u.username === username && u.password === password);
+    if (user) {
+        res.redirect(`/?user=${encodeURIComponent(username)}`);
+    } else {
+        res.redirect('/login?err=Sai+tên+đăng+nhập+hoặc+mật+khẩu!');
+    }
+});
+
+// --- ĐĂNG KÝ ---
+app.get('/register', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Đăng Ký</title>
+        <style>
+            body { font-family: Arial, sans-serif; background: #f4f6f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 380px; box-sizing: border-box; }
+            h2 { text-align: center; color: #2c3e50; margin-bottom: 20px; }
+            input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+            button { width: 100%; background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+            .error { color: #e74c3c; text-align: center; font-size: 13px; margin-bottom: 10px; }
+            a { display: block; text-align: center; margin-top: 15px; color: #2980b9; text-decoration: none; font-size: 13px; }
+        </style></head>
+        <body>
+            <div class="card">
+                <h2>📝 Đăng Ký Tài Khoản</h2>
+                ${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
+                <form action="/auth-register" method="POST">
+                    <input type="text" name="username" placeholder="Tên đăng nhập mới" required>
+                    <input type="password" name="password" placeholder="Mật khẩu" required>
+                    <input type="text" name="secret" placeholder="Từ khóa bí mật (dùng khi quên mật khẩu)" required>
+                    <button type="submit">Đăng Ký</button>
+                </form>
+                <a href="/login">Đã có tài khoản? Đăng nhập</a>
+            </div>
+        </body></html>
+    `);
+});
+
+app.post('/auth-register', (req, res) => {
+    const { username, password, secret } = req.body;
+    let users = loadUsers();
+    if (users.some(u => u.username === username)) {
+        return res.redirect('/register?err=Tên+đăng+nhập+đã+tồn+tại!');
+    }
+    users.push({ username, password, secret });
+    saveUsers(users);
+    res.redirect(`/login?err=Đăng+ký+thành+công!+Hãy+đăng+nhập.`);
+});
+
+// --- QUÊN MẬT KHẨU ---
+app.get('/forgot', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Quên Mật Khẩu</title>
+        <style>
+            body { font-family: Arial, sans-serif; background: #f4f6f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+            .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 380px; box-sizing: border-box; }
+            h2 { text-align: center; color: #2c3e50; margin-bottom: 20px; }
+            input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+            button { width: 100%; background: #e67e22; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+            .error { color: #e74c3c; text-align: center; font-size: 13px; margin-bottom: 10px; }
+            a { display: block; text-align: center; margin-top: 15px; color: #2980b9; text-decoration: none; font-size: 13px; }
+        </style></head>
+        <body>
+            <div class="card">
+                <h2>🔑 Khôi Phục Mật Khẩu</h2>
+                ${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
+                <form action="/auth-forgot" method="POST">
+                    <input type="text" name="username" placeholder="Tên đăng nhập của bạn" required>
+                    <input type="text" name="secret" placeholder="Nhập từ khóa bí mật đã đăng ký" required>
+                    <input type="password" name="newPassword" placeholder="Mật khẩu mới" required>
+                    <button type="submit">Đổi Mật Khẩu</button>
+                </form>
+                <a href="/login">Quay lại đăng nhập</a>
+            </div>
+        </body></html>
+    `);
+});
+
+app.post('/auth-forgot', (req, res) => {
+    const { username, secret, newPassword } = req.body;
+    let users = loadUsers();
+    let user = users.find(u => u.username === username && u.secret === secret);
+    if (user) {
+        user.password = newPassword;
+        saveUsers(users);
+        res.redirect('/login?err=Đổi+mật+khẩu+thành+công!+Hãy+đăng+nhập.');
+    } else {
+        res.redirect('/forgot?err=Sai+tên+đăng+nhập+hoặc+từ+khóa+bí+mật!');
+    }
+});
+
+// --- TRANG CHỦ: DASHBOARD QUẢN LÝ RIÊNG TỪNG USER ---
+app.get('/', (req, res) => {
+    const username = req.query.user;
+    if (!username) return res.redirect('/login');
+
+    const history = loadUserHistory(username);
+    const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
     const now = new Date();
     const defaultDateStr = now.toISOString().split('T')[0];
 
@@ -110,8 +271,8 @@ app.get('/', (req, res) => {
             <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center;">${item.date}</td>
             <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center; font-weight:bold; color:#27ae60;">+${item.score} đ</td>
             <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align:center;">
-                <a href="/edit?index=${index}" style="background:#f39c12; color:white; padding:4px 8px; text-decoration:none; border-radius:4px; font-size:12px; margin-right:4px;">Sửa</a>
-                <a href="/delete?index=${index}" onclick="return confirm('Bạn có chắc muốn xóa ngày này không?');" style="background:#e74c3c; color:white; padding:4px 8px; text-decoration:none; border-radius:4px; font-size:12px;">Xóa</a>
+                <a href="/edit?user=${encodeURIComponent(username)}&index=${index}" style="background:#f39c12; color:white; padding:4px 8px; text-decoration:none; border-radius:4px; font-size:12px; margin-right:4px;">Sửa</a>
+                <a href="/delete?user=${encodeURIComponent(username)}&index=${index}" onclick="return confirm('Bạn có chắc muốn xóa ngày này không?');" style="background:#e74c3c; color:white; padding:4px 8px; text-decoration:none; border-radius:4px; font-size:12px;">Xóa</a>
             </td>
         </tr>
     `).join('');
@@ -120,13 +281,16 @@ app.get('/', (req, res) => {
         <!DOCTYPE html>
         <html lang="vi">
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Quản Lý Chiến Dịch 60 Ngày</title>
+            <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Quản Lý Chiến Dịch - ${username}</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 15px; }
                 .container { max-width: 550px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
                 h2, h3 { text-align: center; color: #2c3e50; }
+                .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 14px; background: #ecf0f1; padding: 10px; border-radius: 8px; }
+                .top-bar a { color: #c0392b; text-decoration: none; font-weight: bold; }
+                .menu-link { display: block; background: #2980b9; color: white; text-align: center; padding: 12px; border-radius: 8px; text-decoration: none; font-weight: bold; margin-bottom: 20px; }
+                .menu-link:hover { background: #1f618d; }
                 .section-title { background: #34495e; color: white; padding: 8px 12px; border-radius: 6px; margin-top: 20px; font-size: 15px; }
                 .form-group { margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
                 label { font-size: 14px; color: #333; flex: 2; }
@@ -141,13 +305,18 @@ app.get('/', (req, res) => {
         </head>
         <body>
             <div class="container">
+                <div class="top-bar">
+                    <span>Xin chào, <b>${username}</b></span>
+                    <a href="/login">Đăng xuất</a>
+                </div>
                 <h2>🚀 Quản Lý Chiến Dịch</h2>
+                <a href="/flashcard" class="menu-link">📖 Mở App Flashcard Ôn Tập Kinh Thánh</a>
                 
                 <div class="stats-box">
-                    🏆 Tổng điểm tích lũy toàn chiến dịch: <b style="color: #27ae60; font-size: 18px;">${cumulativeScore} điểm</b>
+                    🏆 Tổng điểm tích lũy cá nhân: <b style="color: #27ae60; font-size: 18px;">${cumulativeScore} điểm</b>
                 </div>
 
-                <form action="/submit-report" method="POST">
+                <form action="/submit-report?user=${encodeURIComponent(username)}" method="POST">
                     <div class="section-title">📅 CHỌN NGÀY BÁO CÁO</div>
                     <div class="form-group" style="margin-top: 10px;"><label>Ngày báo cáo:</label><input type="date" name="reportDate" value="${defaultDateStr}" required></div>
 
@@ -170,7 +339,7 @@ app.get('/', (req, res) => {
                     <button type="submit">📤 Gửi Báo Cáo</button>
                 </form>
 
-                <div class="section-title" style="margin-top:30px;">📋 Lịch Sử Báo Cáo Các Ngày</div>
+                <div class="section-title" style="margin-top:30px;">📋 Lịch Sử Báo Cáo Cá Nhân</div>
                 <table>
                     <thead>
                         <tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr>
@@ -185,75 +354,177 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Xử lý Gửi báo cáo (Hỗ trợ ngày tùy chọn)
+// --- TRANG FLASHCARD ÔN TẬP KINH THÁNH ---
+app.get('/flashcard', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head>
+            <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Flashcard Ôn Tập Kinh Thánh</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }
+                .container { max-width: 450px; width: 100%; background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); box-sizing: border-box; }
+                h2 { text-align: center; color: #2c3e50; margin-bottom: 15px; font-size: 20px; }
+                .back-home { display: block; text-align: center; margin-bottom: 15px; color: #2980b9; text-decoration: none; font-weight: bold; font-size: 14px; }
+                .controls { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
+                select, button { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 15px; box-sizing: border-box; }
+                .btn-random { background: #e67e22; color: white; border: none; font-weight: bold; cursor: pointer; }
+                .flashcard-container { perspective: 1000px; width: 100%; height: 260px; margin-bottom: 20px; cursor: pointer; }
+                .flashcard { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 0.6s; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
+                .flashcard.flipped { transform: rotateY(180deg); }
+                .card-face { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; border-radius: 12px; text-align: center; }
+                .card-front { background: #ffffff; border: 2px solid #3498db; color: #2c3e50; }
+                .card-back { background: #ebf5fb; border: 2px solid #2980b9; color: #1b4f72; transform: rotateY(180deg); }
+                .card-title { font-size: 13px; color: #7f8c8d; margin-bottom: 8px; text-transform: uppercase; font-weight: bold; }
+                .card-ref { font-size: 22px; font-weight: bold; color: #2980b9; }
+                .card-text { font-size: 16px; line-height: 1.5; }
+                .hint { font-size: 12px; color: #95a5a6; margin-top: 15px; font-style: italic; }
+                .nav-buttons { display: flex; gap: 10px; }
+                .btn-nav { flex: 1; background: #27ae60; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+                .progress { text-align: center; margin-top: 15px; font-size: 14px; color: #555; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <a href="/login" class="back-home">⬅️ Trở về trang Đăng Nhập</a>
+                <h2>📖 Ôn Tập Kinh Thánh</h2>
+                <div class="controls">
+                    <select id="lessonSelect" onchange="changeLesson()"></select>
+                    <button class="btn-random" onclick="selectRandomLesson()">🎲 Chọn Bài Ngẫu Nhiên</button>
+                </div>
+                <div class="flashcard-container" onclick="flipCard()">
+                    <div class="flashcard" id="card">
+                        <div class="card-face card-front">
+                            <div class="card-title" id="frontLessonTitle">Đang tải...</div>
+                            <div class="card-ref" id="frontRef">...</div>
+                            <div class="hint">(Chạm vào thẻ để lật xem nội dung)</div>
+                        </div>
+                        <div class="card-face card-back">
+                            <div class="card-title">Nội Dung Kinh Thánh</div>
+                            <div class="card-text" id="backText">...</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="nav-buttons">
+                    <button class="btn-nav" onclick="prevVerse()">⬅️ Câu Trước</button>
+                    <button class="btn-nav" onclick="nextVerse()">Câu Sau ➡️</button>
+                </div>
+                <div class="progress" id="progressText">Bài 1 / Câu 1</div>
+            </div>
+            <script>
+                const bibleData = [
+                    { id: 1, title: "1-1. Mầu nhiệm về sự tha tội và Đấng An Sang Hồng", verses: [{ ref: "Sáng Thế Ký 2:7", text: "Đức Chúa Trời lấy bụi đất nắn nên hình người..." }, { ref: "Truyền Đạo 12:7", text: "Và bụi tro trở đất y như nguyên cũ..." }] },
+                    { id: 2, title: "1-2. Đấng Cứu Chúa theo mỗi thời đại và danh mới", verses: [{ ref: "Công Vụ Các Sứ Tồ 4:12", text: "Chẳng có sự cứu rỗi trong đấng nào khác..." }] }
+                ];
+                let currentLessonIndex = 0, currentVerseIndex = 0, isFlipped = false;
+                function initApp() {
+                    const select = document.getElementById('lessonSelect');
+                    bibleData.forEach((lesson, index) => {
+                        let opt = document.createElement('option');
+                        opt.value = index; opt.textContent = lesson.title;
+                        select.appendChild(opt);
+                    });
+                    loadCard();
+                }
+                function loadCard() {
+                    const lesson = bibleData[currentLessonIndex];
+                    const verse = lesson.verses[currentVerseIndex];
+                    document.getElementById('frontLessonTitle').textContent = lesson.title;
+                    document.getElementById('frontRef').textContent = verse.ref;
+                    document.getElementById('backText').textContent = verse.text;
+                    document.getElementById('progressText').textContent = \`Bài \${currentLessonIndex + 1} | Câu \${currentVerseIndex + 1} / \${lesson.verses.length}\`;
+                    if(isFlipped) flipCard();
+                }
+                function flipCard() { document.getElementById('card').classList.toggle('flipped'); isFlipped = !isFlipped; }
+                function nextVerse() {
+                    const lesson = bibleData[currentLessonIndex];
+                    currentVerseIndex = (currentVerseIndex < lesson.verses.length - 1) ? currentVerseIndex + 1 : 0;
+                    loadCard();
+                }
+                function prevVerse() {
+                    const lesson = bibleData[currentLessonIndex];
+                    currentVerseIndex = (currentVerseIndex > 0) ? currentVerseIndex - 1 : lesson.verses.length - 1;
+                    loadCard();
+                }
+                function changeLesson() {
+                    currentLessonIndex = parseInt(document.getElementById('lessonSelect').value);
+                    currentVerseIndex = 0; loadCard();
+                }
+                function selectRandomLesson() {
+                    currentLessonIndex = Math.floor(Math.random() * bibleData.length);
+                    document.getElementById('lessonSelect').value = currentLessonIndex;
+                    currentVerseIndex = 0; loadCard();
+                }
+                window.onload = initApp;
+            </script>
+        </body>
+        </html>
+    `);
+});
+
 app.post('/submit-report', async (req, res) => {
-    const rawDate = req.body.reportDate; // Nhận dạng YYYY-MM-DD từ input date
-    let dateStr = '';
-    if (rawDate) {
-        const [yyyy, mm, dd] = rawDate.split('-');
-        dateStr = `${dd}/${mm}/${yyyy}`;
-    } else {
-        const today = new Date();
-        const dd = String(today.getDate()).padStart(2, '0');
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const yyyy = today.getFullYear();
-        dateStr = `${dd}/${mm}/${yyyy}`;
-    }
+    const username = req.query.user;
+    if (!username) return res.redirect('/login');
 
-    const { reportContent, summaryContent } = calculateScoreAndContent(dateStr, req.body);
+    const rawDate = req.body.reportDate;
+    let dateStr = rawDate ? rawDate.split('-').reverse().join('/') : new Date().toLocaleDateString('vi-VN');
 
-    await sendToSignal(`📥 **BÁO CÁO NGÀY ${dateStr}**\n\n` + reportContent);
+    const { reportContent, summaryContent } = calculateScoreAndContent(username, dateStr, req.body);
+
+    await sendToSignal(`📥 **BÁO CÁO [${username}] - ${dateStr}**\n\n` + reportContent);
     setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
 
     res.send(`
         <body style="text-align:center; padding-top:50px; font-family:Arial;">
-            <h1 style="color:green;">✅ Gửi Báo Cáo Ngày ${dateStr} Thành Công!</h1>
-            <p>Đã cập nhật điểm tích lũy và gửi thông báo sang Signal.</p>
-            <a href="/" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#2980b9; color:white; text-decoration:none; border-radius:6px;">Quay Lại Trang Chủ</a>
+            <h1 style="color:green;">✅ Gửi Báo Cáo Thành Công!</h1>
+            <a href="/?user=${encodeURIComponent(username)}" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#2980b9; color:white; text-decoration:none; border-radius:6px;">Quay Lại Trang Chủ</a>
         </body>
     `);
 });
 
-// Xử lý Xóa lịch sử
 app.get('/delete', async (req, res) => {
+    const username = req.query.user;
     const index = parseInt(req.query.index);
-    let history = loadHistory();
+    if (!username) return res.redirect('/login');
+
+    let history = loadUserHistory(username);
     if (!isNaN(index) && index >= 0 && index < history.length) {
         const deletedDay = history.splice(index, 1)[0];
-        saveHistory(history);
-
+        saveUserHistory(username, history);
         const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
-        await sendToSignal(`🗑️ **THÔNG BÁO XÓA BÁO CÁO**\nĐã xóa dữ liệu ngày: ${deletedDay.date}\n🏆 Tổng điểm tích lũy hiện tại: **${cumulativeScore} điểm**`);
+        await sendToSignal(`🗑️ **[${username}] XÓA BÁO CÁO**\nĐã xóa ngày: ${deletedDay.date}\n🏆 Tổng điểm tích lũy hiện tại: **${cumulativeScore} điểm**`);
     }
-    res.redirect('/');
+    res.redirect(`/?user=${encodeURIComponent(username)}`);
 });
 
-// Xử lý Sửa lịch sử (Form chi tiết)
 app.get('/edit', (req, res) => {
+    const username = req.query.user;
     const index = parseInt(req.query.index);
-    let history = loadHistory();
-    if (isNaN(index) || index < 0 || index >= history.length) {
-        return res.redirect('/');
-    }
+    if (!username) return res.redirect('/login');
+
+    let history = loadUserHistory(username);
+    if (isNaN(index) || index < 0 || index >= history.length) return res.redirect(`/?user=${encodeURIComponent(username)}`);
+    
     const item = history[index];
-    const d = item.details || { tinNguong: 1, kinhThanh: 1, sachLT: 1, tapGd: 1, baiMoi: 0, baiCu: 0, edu: 0, donThuan: 0, huuHieu: 0, ketTrai: 0 };
+    const d = item.details || {};
 
     res.send(`
         <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><title>Sửa Điểm Ngày ${item.date}</title></head>
+        <html lang="vi"><head><meta charset="UTF-8"><title>Sửa Điểm Ngày ${item.date}</title></head>
         <body style="font-family:Arial; padding:15px; background:#f4f6f9;">
             <div style="max-width:500px; margin:0 auto; background:white; padding:20px; border-radius:12px;">
-                <h3>Sửa Báo Cáo Cho Ngày: ${item.date}</h3>
+                <h3>Sửa Báo Cáo Ngày: ${item.date} (${username})</h3>
                 <form action="/update-edit" method="POST">
+                    <input type="hidden" name="user" value="${username}">
                     <input type="hidden" name="index" value="${index}">
                     <input type="hidden" name="date" value="${item.date}">
                     
                     <div style="background:#34495e; color:white; padding:6px 10px; border-radius:4px; margin-top:15px; font-size:14px;">🌟 MY PAGE</div>
-                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="${d.tinNguong !== undefined ? d.tinNguong : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
-                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="${d.kinhThanh !== undefined ? d.kinhThanh : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
-                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Sách LT:</label><input type="number" name="sachLT" value="${d.sachLT !== undefined ? d.sachLT : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
-                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Tập Gđ:</label><input type="number" name="tapGd" value="${d.tapGd !== undefined ? d.tapGd : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="${d.tinNguong ?? 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="${d.kinhThanh ?? 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Sách LT:</label><input type="number" name="sachLT" value="${d.sachLT ?? 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Tập Gđ:</label><input type="number" name="tapGd" value="${d.tapGd ?? 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
 
                     <div style="background:#34495e; color:white; padding:6px 10px; border-radius:4px; margin-top:15px; font-size:14px;">🎊 PHÁT BIỂU & EDU</div>
                     <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Bài mới:</label><input type="number" name="baiMoi" value="${d.baiMoi || 0}" min="0" style="width:70px; text-align:center;" required></div>
@@ -265,31 +536,31 @@ app.get('/edit', (req, res) => {
                     <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="${d.huuHieu || 0}" min="0" style="width:70px; text-align:center;" required></div>
                     <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Kết trái:</label><input type="number" name="ketTrai" value="${d.ketTrai || 0}" min="0" style="width:70px; text-align:center;" required></div>
 
-                    <button type="submit" style="width:100%; background:#27ae60; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; margin-top:20px; cursor:pointer;">💾 Lưu Thay Đổi & Gửi Signal</button>
+                    <button type="submit" style="width:100%; background:#27ae60; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; margin-top:20px; cursor:pointer;">💾 Lưu Thay Đổi</button>
                 </form>
-                <a href="/" style="display:block; text-align:center; margin-top:15px; color:#555; text-decoration:none;">Quay lại</a>
+                <a href="/?user=${encodeURIComponent(username)}" style="display:block; text-align:center; margin-top:15px; color:#555; text-decoration:none;">Quay lại</a>
             </div>
-        </body>
-        </html>
+        </body></html>
     `);
 });
 
 app.post('/update-edit', async (req, res) => {
-    const dateStr = req.body.date;
-    const { reportContent, summaryContent } = calculateScoreAndContent(dateStr, req.body);
+    const { user: username, date: dateStr } = req.body;
+    if (!username) return res.redirect('/login');
 
-    await sendToSignal(`✏️ **CẬP NHẬT/SỬA BÁO CÁO NGÀY ${dateStr}**\n\n` + reportContent);
+    const { reportContent, summaryContent } = calculateScoreAndContent(username, dateStr, req.body);
+    await sendToSignal(`✏️ **[${username}] CẬP NHẬT NGÀY ${dateStr}**\n\n` + reportContent);
     setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
 
     res.send(`
         <body style="text-align:center; padding-top:50px; font-family:Arial;">
-            <h1 style="color:green;">✅ Đã Sửa & Bắn Signal Thành Công!</h1>
-            <a href="/" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#2980b9; color:white; text-decoration:none; border-radius:6px;">Quay Lại Trang Chủ</a>
+            <h1 style="color:green;">✅ Đã Sửa Thành Công!</h1>
+            <a href="/?user=${encodeURIComponent(username)}" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#2980b9; color:white; text-decoration:none; border-radius:6px;">Quay Lại Trang Chủ</a>
         </body>
     `);
 });
 
-// --- PHẦN BOT TELEGRAM GIỮ NGUYÊN ---
+// --- PHẦN BOT TELEGRAM ---
 const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
 let savedChatId = null;
 const steps = [
@@ -307,32 +578,26 @@ const steps = [
 const sessions = {};
 const persistentKeyboard = Markup.keyboard([['🚀 Bắt Đầu Báo Cáo Nhanh']]).resize();
 
-bot.start((ctx) => { savedChatId = ctx.chat.id; ctx.reply('Bot đã sẵn sàng!', persistentKeyboard); });
-bot.hears('🚀 Bắt Đầu Báo Cáo Nhanh', (ctx) => { savedChatId = ctx.chat.id; startReportSession(ctx); });
-bot.command('nhacnho', (ctx) => { savedChatId = ctx.chat.id; startReportSession(ctx); });
-
-async function startReportSession(ctx) {
-    const chatId = ctx.chat.id;
-    sessions[chatId] = { step: 0, data: {} };
-    await ctx.reply(`🚀 **BÁO CÁO CHIẾN DỊCH**\nNhập số cho mục:\n\n👉 **${steps[0].label}:**`, persistentKeyboard);
-}
-
-cron.schedule('0 21 * * *', async () => {
-    if (savedChatId) {
-        try { await bot.telegram.sendMessage(savedChatId, '⏰ Đến giờ báo cáo chiến dịch rồi Cường ơi!', persistentKeyboard); } catch (e) {}
-    }
-}, { timezone: "Asia/Ho_Chi_Minh" });
+bot.start((ctx) => { savedChatId = ctx.chat.id; ctx.reply('Bot đã sẵn sàng! Truy cập web để đăng nhập.', persistentKeyboard); });
+bot.hears('🚀 Bắt Đầu Báo Cáo Nhanh', (ctx) => {
+    sessions[ctx.chat.id] = { step: 0, data: {} };
+    ctx.reply('Nhập tên tài khoản (Username) của bạn trên hệ thống:', persistentKeyboard);
+});
 
 bot.on('text', async (ctx) => {
     const chatId = ctx.chat.id;
-    savedChatId = chatId;
     const text = ctx.message.text;
     if (text.startsWith('/') || text === '🚀 Bắt Đầu Báo Cáo Nhanh') return;
 
     let session = sessions[chatId];
     if (!session) {
-        await ctx.reply('Hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** trước nhé!', persistentKeyboard);
-        return;
+        return ctx.reply('Hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** trước nhé!', persistentKeyboard);
+    }
+
+    if (session.username === undefined) {
+        session.username = text.trim();
+        session.step = 0;
+        return ctx.reply(`👉 **${steps[0].label}:**`, persistentKeyboard);
     }
 
     const currentStep = steps[session.step];
@@ -344,23 +609,18 @@ bot.on('text', async (ctx) => {
         await ctx.reply(`👉 **${nextStep.label}:**`, persistentKeyboard);
     } else {
         const today = new Date();
-        const dd = String(today.getDate()).padStart(2, '0');
-        const mm = String(today.getMonth() + 1).padStart(2, '0');
-        const yyyy = today.getFullYear();
-        const currentDateStr = `${dd}/${mm}/${yyyy}`;
+        const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+        const { reportContent, summaryContent } = calculateScoreAndContent(session.username, dateStr, session.data);
 
-        const { reportContent, summaryContent } = calculateScoreAndContent(currentDateStr, session.data);
-
-        await ctx.reply(`📋 **ĐÃ TỔNG HỢP XONG:**\n\n${reportContent}\n\n${summaryContent}`, persistentKeyboard);
-        
+        await ctx.reply(`📋 **ĐÃ TỔNG HỢP CHO [${session.username}]:**\n\n${reportContent}\n\n${summaryContent}`, persistentKeyboard);
         try {
             await sendToSignal(reportContent);
             setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
-            await ctx.reply('✅ Đã gửi báo cáo tích lũy sang Signal thành công!', persistentKeyboard);
+            await ctx.reply('✅ Đã gửi báo cáo sang Signal thành công!', persistentKeyboard);
         } catch (e) {}
         delete sessions[chatId];
     }
 });
 
-app.listen(PORT, () => { console.log(`Web Dashboard đang chạy trên cổng ${PORT}`); });
+app.listen(PORT, () => { console.log(`Web App đang chạy trên cổng ${PORT}`); });
 bot.launch();
