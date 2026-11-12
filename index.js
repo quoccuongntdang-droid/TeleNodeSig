@@ -12,6 +12,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 const HISTORY_FILE = path.join(__dirname, 'history.json');
+const PHONE = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
+const APIKEY = '911098';
 
 function loadHistory() {
     try {
@@ -27,16 +29,81 @@ function loadHistory() {
 
 function saveHistory(history) {
     try {
+        // Sắp xếp lịch sử theo ngày tháng tăng dần để hiển thị chuẩn
+        history.sort((a, b) => {
+            const [dA, mA, yA] = a.date.split('/');
+            const [dB, mB, yB] = b.date.split('/');
+            return new Date(`${yA}-${mA}-${dA}`) - new Date(`${yB}-${mB}-${dB}`);
+        });
         fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2), 'utf8');
     } catch (e) {
         console.error('Lỗi ghi lịch sử:', e.message);
     }
 }
 
-// --- GIAO DIỆN WEB DASHBOARD (CÓ FORM NHẬP & BẢNG QUẢN LÝ LỊCH SỬ) ---
+async function sendToSignal(message) {
+    try {
+        await axios.get(`https://signal.callmebot.com/signal/send.php?phone=${PHONE}&apikey=${APIKEY}&text=${encodeURIComponent(message)}`);
+    } catch (e) {
+        console.error('Lỗi gửi Signal:', e.message);
+    }
+}
+
+// Hàm tính điểm và lưu trữ theo ngày chỉ định
+function calculateScoreAndContent(dateStr, d) {
+    const p1 = (Number(d.tinNguong) + Number(d.kinhThanh) + Number(d.sachLT) + Number(d.tapGd)) * 10;
+    const p2 = (Number(d.baiMoi) * 100) + (Number(d.baiCu) * 100) + (Number(d.edu) * 40);
+    const p3 = (Number(d.donThuan) * 10) + (Number(d.huuHieu) * 100) + (Number(d.ketTrai) * 500);
+    const totalDayScore = p1 + p2 + p3;
+
+    let history = loadHistory();
+    const existingIndex = history.findIndex(item => item.date === dateStr);
+    
+    const dayData = {
+        date: dateStr,
+        score: totalDayScore,
+        details: {
+            tinNguong: Number(d.tinNguong),
+            kinhThanh: Number(d.kinhThanh),
+            sachLT: Number(d.sachLT),
+            tapGd: Number(d.tapGd),
+            baiMoi: Number(d.baiMoi),
+            baiCu: Number(d.baiCu),
+            edu: Number(d.edu),
+            donThuan: Number(d.donThuan),
+            huuHieu: Number(d.huuHieu),
+            ketTrai: Number(d.ketTrai)
+        }
+    };
+
+    if (existingIndex >= 0) {
+        history[existingIndex] = dayData;
+    } else {
+        history.push(dayData);
+    }
+    saveHistory(history);
+
+    const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
+    const startDate = new Date('2026-11-01');
+    const today = new Date();
+    const diffTime = Math.abs(today - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const progressPercent = Math.min(Math.max((diffDays / 60) * 100, 0), 100).toFixed(1);
+
+    const reportContent = `CPN KVT - Ngày ${dateStr}\n\n🌟MYPAGE🌟\n🔰Đánh Giá Tín Ngưỡng: ${d.tinNguong}\n🔰Kinh thánh: ${d.kinhThanh}\n🔰Sách LT: ${d.sachLT}\n🔰Tập Gđ: ${d.tapGd}\n🎊PHÁT BIỂU🎉\n🔰Bài mới: ${d.baiMoi}\n🔰Bài cũ: ${d.baiCu}\n🔰EDU: ${d.edu}\n🔥TRUDA🔥\n🔰Đơn Thuần: ${d.donThuan}\n🔰Hữu Hiệu: ${d.huuHieu}\n🔰Kết trái: ${d.ketTrai}`;
+    const summaryContent = `📊 **TỔNG KẾT TÍCH LŨY:**\n⭐ Điểm ngày (${dateStr}): **+${totalDayScore} điểm**\n🏆 **Tổng điểm tích lũy:** **${cumulativeScore} điểm**\n📈 Tiến độ 60 ngày: **${progressPercent}%** (Ngày thứ ${diffDays}/60)`;
+
+    return { reportContent, summaryContent };
+}
+
+// --- GIAO DIỆN WEB DASHBOARD (CÓ CHỌN NGÀY NHẬP BÙ) ---
 app.get('/', (req, res) => {
     const history = loadHistory();
     const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
+
+    // Lấy ngày hiện tại định dạng YYYY-MM-DD cho ô input date mặc định
+    const now = new Date();
+    const defaultDateStr = now.toISOString().split('T')[0];
 
     let historyRows = history.map((item, index) => `
         <tr>
@@ -63,7 +130,8 @@ app.get('/', (req, res) => {
                 .section-title { background: #34495e; color: white; padding: 8px 12px; border-radius: 6px; margin-top: 20px; font-size: 15px; }
                 .form-group { margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
                 label { font-size: 14px; color: #333; flex: 2; }
-                input { width: 70px; padding: 6px; text-align: center; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; flex: 1; }
+                input[type="number"] { width: 70px; padding: 6px; text-align: center; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; flex: 1; }
+                input[type="date"] { padding: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; flex: 1; text-align: center; }
                 button { width: 100%; background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; font-size: 16px; font-weight: bold; margin-top: 20px; cursor: pointer; }
                 button:hover { background: #219653; }
                 .stats-box { background: #e8f8f5; border: 1px solid #a3e4d7; padding: 12px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
@@ -80,6 +148,9 @@ app.get('/', (req, res) => {
                 </div>
 
                 <form action="/submit-report" method="POST">
+                    <div class="section-title">📅 CHỌN NGÀY BÁO CÁO</div>
+                    <div class="form-group" style="margin-top: 10px;"><label>Ngày báo cáo:</label><input type="date" name="reportDate" value="${defaultDateStr}" required></div>
+
                     <div class="section-title">🌟 MY PAGE (Nhập 0 hoặc 1)</div>
                     <div class="form-group"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="1" min="0" max="1" required></div>
                     <div class="form-group"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="1" min="0" max="1" required></div>
@@ -96,7 +167,7 @@ app.get('/', (req, res) => {
                     <div class="form-group"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="0" min="0" required></div>
                     <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="0" min="0" required></div>
 
-                    <button type="submit">📤 Gửi Báo Cáo Hôm Nay</button>
+                    <button type="submit">📤 Gửi Báo Cáo</button>
                 </form>
 
                 <div class="section-title" style="margin-top:30px;">📋 Lịch Sử Báo Cáo Các Ngày</div>
@@ -114,69 +185,50 @@ app.get('/', (req, res) => {
     `);
 });
 
-// Xử lý Gửi báo cáo mới
+// Xử lý Gửi báo cáo (Hỗ trợ ngày tùy chọn)
 app.post('/submit-report', async (req, res) => {
-    const d = req.body;
-    const p1 = (Number(d.tinNguong) + Number(d.kinhThanh) + Number(d.sachLT) + Number(d.tapGd)) * 10;
-    const p2 = (Number(d.baiMoi) * 100) + (Number(d.baiCu) * 100) + (Number(d.edu) * 40);
-    const p3 = (Number(d.donThuan) * 10) + (Number(d.huuHieu) * 100) + (Number(d.ketTrai) * 500);
-    const totalDayScore = p1 + p2 + p3;
-
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy = today.getFullYear();
-    const currentDateStr = `${dd}/${mm}/${yyyy}`;
-
-    let history = loadHistory();
-    const existingIndex = history.findIndex(item => item.date === currentDateStr);
-    if (existingIndex >= 0) {
-        history[existingIndex].score = totalDayScore;
+    const rawDate = req.body.reportDate; // Nhận dạng YYYY-MM-DD từ input date
+    let dateStr = '';
+    if (rawDate) {
+        const [yyyy, mm, dd] = rawDate.split('-');
+        dateStr = `${dd}/${mm}/${yyyy}`;
     } else {
-        history.push({ date: currentDateStr, score: totalDayScore });
+        const today = new Date();
+        const dd = String(today.getDate()).padStart(2, '0');
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const yyyy = today.getFullYear();
+        dateStr = `${dd}/${mm}/${yyyy}`;
     }
-    saveHistory(history);
 
-    const cumulativeScore = history.reduce((sum, item) => sum + item.score, 0);
-    const startDate = new Date('2026-11-01');
-    const diffTime = Math.abs(today - startDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const progressPercent = Math.min(Math.max((diffDays / 60) * 100, 0), 100).toFixed(1);
+    const { reportContent, summaryContent } = calculateScoreAndContent(dateStr, req.body);
 
-    const reportContent = `CPN KVT - Ngày ${currentDateStr}\n\n🌟MYPAGE🌟\n🔰Đánh Giá Tín Ngưỡng: ${d.tinNguong}\n🔰Kinh thánh: ${d.kinhThanh}\n🔰Sách LT: ${d.sachLT}\n🔰Tập Gđ: ${d.tapGd}\n🎊PHÁT BIỂU🎉\n🔰Bài mới: ${d.baiMoi}\n🔰Bài cũ: ${d.baiCu}\n🔰EDU: ${d.edu}\n🔥TRUDA🔥\n🔰Đơn Thuần: ${d.donThuan}\n🔰Hữu Hiệu: ${d.huuHieu}\n🔰Kết trái: ${d.ketTrai}`;
-    const summaryContent = `📊 **TỔNG KẾT TÍCH LŨY:**\n⭐ Điểm ngày (${currentDateStr}): **+${totalDayScore} điểm**\n🏆 **Tổng điểm tích lũy:** **${cumulativeScore} điểm**\n📈 Tiến độ 60 ngày: **${progressPercent}%** (Ngày thứ ${diffDays}/60)`;
+    await sendToSignal(`📥 **BÁO CÁO NGÀY ${dateStr}**\n\n` + reportContent);
+    setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
 
-    try {
-        const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
-        const apikey = '911098';
-        await axios.get(`https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(reportContent)}`);
-        setTimeout(async () => {
-            await axios.get(`https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(summaryContent)}`);
-        }, 1000);
-
-        res.send(`
-            <body style="text-align:center; padding-top:50px; font-family:Arial;">
-                <h1 style="color:green;">✅ Gửi & Cập Nhật Thành Công!</h1>
-                <a href="/" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#2980b9; color:white; text-decoration:none; border-radius:6px;">Quay Lại Trang Chủ</a>
-            </body>
-        `);
-    } catch (e) {
-        res.send(`<h3 style="color:red;">Lỗi gửi Signal: ${e.message}</h3><a href="/">Quay lại</a>`);
-    }
+    res.send(`
+        <body style="text-align:center; padding-top:50px; font-family:Arial;">
+            <h1 style="color:green;">✅ Gửi Báo Cáo Ngày ${dateStr} Thành Công!</h1>
+            <p>Đã cập nhật điểm tích lũy và gửi thông báo sang Signal.</p>
+            <a href="/" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#2980b9; color:white; text-decoration:none; border-radius:6px;">Quay Lại Trang Chủ</a>
+        </body>
+    `);
 });
 
-// Xử lý Xóa lịch sử một ngày
-app.get('/delete', (req, res) => {
+// Xử lý Xóa lịch sử
+app.get('/delete', async (req, res) => {
     const index = parseInt(req.query.index);
     let history = loadHistory();
     if (!isNaN(index) && index >= 0 && index < history.length) {
-        history.splice(index, 1);
+        const deletedDay = history.splice(index, 1)[0];
         saveHistory(history);
+
+        const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
+        await sendToSignal(`🗑️ **THÔNG BÁO XÓA BÁO CÁO**\nĐã xóa dữ liệu ngày: ${deletedDay.date}\n🏆 Tổng điểm tích lũy hiện tại: **${cumulativeScore} điểm**`);
     }
     res.redirect('/');
 });
 
-// Xử lý Sửa lịch sử (Giao diện đơn giản để nhập lại điểm số ngày đó)
+// Xử lý Sửa lịch sử (Form chi tiết)
 app.get('/edit', (req, res) => {
     const index = parseInt(req.query.index);
     let history = loadHistory();
@@ -184,19 +236,36 @@ app.get('/edit', (req, res) => {
         return res.redirect('/');
     }
     const item = history[index];
+    const d = item.details || { tinNguong: 1, kinhThanh: 1, sachLT: 1, tapGd: 1, baiMoi: 0, baiCu: 0, edu: 0, donThuan: 0, huuHieu: 0, ketTrai: 0 };
 
     res.send(`
         <!DOCTYPE html>
         <html lang="vi">
         <head><meta charset="UTF-8"><title>Sửa Điểm Ngày ${item.date}</title></head>
-        <body style="font-family:Arial; padding:20px; background:#f4f6f9;">
-            <div style="max-width:400px; margin:0 auto; background:white; padding:20px; border-radius:8px;">
-                <h3>Sửa Điểm Cho Ngày: ${item.date}</h3>
+        <body style="font-family:Arial; padding:15px; background:#f4f6f9;">
+            <div style="max-width:500px; margin:0 auto; background:white; padding:20px; border-radius:12px;">
+                <h3>Sửa Báo Cáo Cho Ngày: ${item.date}</h3>
                 <form action="/update-edit" method="POST">
                     <input type="hidden" name="index" value="${index}">
-                    <label>Nhập lại tổng điểm cho ngày này:</label>
-                    <input type="number" name="newScore" value="${item.score}" style="width:100%; padding:8px; margin:15px 0; box-sizing:border-box;" required>
-                    <button type="submit" style="width:100%; background:#27ae60; color:white; border:none; padding:10px; border-radius:5px; font-weight:bold;">Lưu Thay Đổi</button>
+                    <input type="hidden" name="date" value="${item.date}">
+                    
+                    <div style="background:#34495e; color:white; padding:6px 10px; border-radius:4px; margin-top:15px; font-size:14px;">🌟 MY PAGE</div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="${d.tinNguong !== undefined ? d.tinNguong : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="${d.kinhThanh !== undefined ? d.kinhThanh : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Sách LT:</label><input type="number" name="sachLT" value="${d.sachLT !== undefined ? d.sachLT : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Tập Gđ:</label><input type="number" name="tapGd" value="${d.tapGd !== undefined ? d.tapGd : 1}" min="0" max="1" style="width:70px; text-align:center;" required></div>
+
+                    <div style="background:#34495e; color:white; padding:6px 10px; border-radius:4px; margin-top:15px; font-size:14px;">🎊 PHÁT BIỂU & EDU</div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Bài mới:</label><input type="number" name="baiMoi" value="${d.baiMoi || 0}" min="0" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Bài cũ:</label><input type="number" name="baiCu" value="${d.baiCu || 0}" min="0" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>EDU:</label><input type="number" name="edu" value="${d.edu || 0}" min="0" style="width:70px; text-align:center;" required></div>
+
+                    <div style="background:#34495e; color:white; padding:6px 10px; border-radius:4px; margin-top:15px; font-size:14px;">🔥 TRUDA</div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Đơn Thuần:</label><input type="number" name="donThuan" value="${d.donThuan || 0}" min="0" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="${d.huuHieu || 0}" min="0" style="width:70px; text-align:center;" required></div>
+                    <div style="display:flex; justify-content:space-between; margin:8px 0;"><label>Kết trái:</label><input type="number" name="ketTrai" value="${d.ketTrai || 0}" min="0" style="width:70px; text-align:center;" required></div>
+
+                    <button type="submit" style="width:100%; background:#27ae60; color:white; border:none; padding:12px; border-radius:6px; font-weight:bold; margin-top:20px; cursor:pointer;">💾 Lưu Thay Đổi & Gửi Signal</button>
                 </form>
                 <a href="/" style="display:block; text-align:center; margin-top:15px; color:#555; text-decoration:none;">Quay lại</a>
             </div>
@@ -205,18 +274,22 @@ app.get('/edit', (req, res) => {
     `);
 });
 
-app.post('/update-edit', (req, res) => {
-    const index = parseInt(req.body.index);
-    const newScore = parseInt(req.body.newScore);
-    let history = loadHistory();
-    if (!isNaN(index) && index >= 0 && index < history.length && !isNaN(newScore)) {
-        history[index].score = newScore;
-        saveHistory(history);
-    }
-    res.redirect('/');
+app.post('/update-edit', async (req, res) => {
+    const dateStr = req.body.date;
+    const { reportContent, summaryContent } = calculateScoreAndContent(dateStr, req.body);
+
+    await sendToSignal(`✏️ **CẬP NHẬT/SỬA BÁO CÁO NGÀY ${dateStr}**\n\n` + reportContent);
+    setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
+
+    res.send(`
+        <body style="text-align:center; padding-top:50px; font-family:Arial;">
+            <h1 style="color:green;">✅ Đã Sửa & Bắn Signal Thành Công!</h1>
+            <a href="/" style="display:inline-block; margin-top:20px; padding:10px 20px; background:#2980b9; color:white; text-decoration:none; border-radius:6px;">Quay Lại Trang Chủ</a>
+        </body>
+    `);
 });
 
-// --- PHẦN BOT TELEGRAM VẪN GIỮ NGUYÊN ---
+// --- PHẦN BOT TELEGRAM GIỮ NGUYÊN ---
 const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
 let savedChatId = null;
 const steps = [
@@ -234,7 +307,7 @@ const steps = [
 const sessions = {};
 const persistentKeyboard = Markup.keyboard([['🚀 Bắt Đầu Báo Cáo Nhanh']]).resize();
 
-bot.start((ctx) => { savedChatId = ctx.chat.id; ctx.reply('Bot & Web Quản Lý đã sẵn sàng!', persistentKeyboard); });
+bot.start((ctx) => { savedChatId = ctx.chat.id; ctx.reply('Bot đã sẵn sàng!', persistentKeyboard); });
 bot.hears('🚀 Bắt Đầu Báo Cáo Nhanh', (ctx) => { savedChatId = ctx.chat.id; startReportSession(ctx); });
 bot.command('nhacnho', (ctx) => { savedChatId = ctx.chat.id; startReportSession(ctx); });
 
@@ -246,9 +319,7 @@ async function startReportSession(ctx) {
 
 cron.schedule('0 21 * * *', async () => {
     if (savedChatId) {
-        try {
-            await bot.telegram.sendMessage(savedChatId, '⏰ **Đến giờ báo cáo chiến dịch rồi Cường ơi!** Truy cập Web Dashboard để quản lý và nhập liệu nhé:', persistentKeyboard);
-        } catch (e) {}
+        try { await bot.telegram.sendMessage(savedChatId, '⏰ Đến giờ báo cáo chiến dịch rồi Cường ơi!', persistentKeyboard); } catch (e) {}
     }
 }, { timezone: "Asia/Ho_Chi_Minh" });
 
@@ -260,7 +331,7 @@ bot.on('text', async (ctx) => {
 
     let session = sessions[chatId];
     if (!session) {
-        await ctx.reply('Cường ơi, hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** phía dưới nhé!', persistentKeyboard);
+        await ctx.reply('Hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** trước nhé!', persistentKeyboard);
         return;
     }
 
@@ -272,49 +343,24 @@ bot.on('text', async (ctx) => {
         const nextStep = steps[session.step];
         await ctx.reply(`👉 **${nextStep.label}:**`, persistentKeyboard);
     } else {
-        const d = session.data;
-        const p1 = (Number(d.tinNguong) + Number(d.kinhThanh) + Number(d.sachLT) + Number(d.tapGd)) * 10;
-        const p2 = (Number(d.baiMoi) * 100) + (Number(d.baiCu) * 100) + (Number(d.edu) * 40);
-        const p3 = (Number(d.donThuan) * 10) + (Number(d.huuHieu) * 100) + (Number(d.ketTrai) * 500);
-        const totalDayScore = p1 + p2 + p3;
-
         const today = new Date();
         const dd = String(today.getDate()).padStart(2, '0');
         const mm = String(today.getMonth() + 1).padStart(2, '0');
         const yyyy = today.getFullYear();
         const currentDateStr = `${dd}/${mm}/${yyyy}`;
 
-        let history = loadHistory();
-        const existingIndex = history.findIndex(item => item.date === currentDateStr);
-        if (existingIndex >= 0) history[existingIndex].score = totalDayScore;
-        else history.push({ date: currentDateStr, score: totalDayScore });
-        saveHistory(history);
-
-        const cumulativeScore = history.reduce((sum, item) => sum + item.score, 0);
-        const startDate = new Date('2026-11-01');
-        const diffTime = Math.abs(today - startDate);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        const progressPercent = Math.min(Math.max((diffDays / 60) * 100, 0), 100).toFixed(1);
-
-        const reportContent = `CPN KVT - Ngày ${currentDateStr}\n\n🌟MYPAGE🌟\n🔰Đánh Giá Tín Ngưỡng: ${d.tinNguong}\n🔰Kinh thánh: ${d.kinhThanh}\n🔰Sách LT: ${d.sachLT}\n🔰Tập Gđ: ${d.tapGd}\n🎊PHÁT BIỂU🎉\n🔰Bài mới: ${d.baiMoi}\n🔰Bài cũ: ${d.baiCu}\n🔰EDU: ${d.edu}\n🔥TRUDA🔥\n🔰Đơn Thuần: ${d.donThuan}\n🔰Hữu Hiệu: ${d.huuHieu}\n🔰Kết trái: ${d.ketTrai}`;
-        const summaryContent = `📊 **TỔNG KẾT TÍCH LŨY:**\n⭐ Điểm ngày (${currentDateStr}): **+${totalDayScore} điểm**\n🏆 **Tổng điểm tích lũy:** **${cumulativeScore} điểm**\n📈 Tiến độ 60 ngày: **${progressPercent}%** (Ngày thứ ${diffDays}/60)`;
+        const { reportContent, summaryContent } = calculateScoreAndContent(currentDateStr, session.data);
 
         await ctx.reply(`📋 **ĐÃ TỔNG HỢP XONG:**\n\n${reportContent}\n\n${summaryContent}`, persistentKeyboard);
         
         try {
-            const phone = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
-            const apikey = '911098';
-            await axios.get(`https://signal.callmebot.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(reportContent)}`);
-            setTimeout(async () => {
-                await axios.get(`https://signal.callmebox.com/signal/send.php?phone=${phone}&apikey=${apikey}&text=${encodeURIComponent(summaryContent)}`);
-            }, 1000);
-            await ctx.reply('✅ **Đã gửi báo cáo tích lũy sang Signal thành công!**', persistentKeyboard);
+            await sendToSignal(reportContent);
+            setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
+            await ctx.reply('✅ Đã gửi báo cáo tích lũy sang Signal thành công!', persistentKeyboard);
         } catch (e) {}
         delete sessions[chatId];
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Web Dashboard quản lý đang chạy trên cổng ${PORT}`);
-});
+app.listen(PORT, () => { console.log(`Web Dashboard đang chạy trên cổng ${PORT}`); });
 bot.launch();
