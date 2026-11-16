@@ -120,7 +120,7 @@ function calculateScoreAndContent(username, dateStr, d) {
     return { reportContent, summaryContent };
 }
 
-// --- TRANG ĐĂNG NHẬP / ĐĂNG KÝ ---
+// --- TRANG ĐĂNG NHẬP / ĐĂNG KÝ (WEB) ---
 app.get('/login', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -448,66 +448,230 @@ app.post('/update-edit', async (req, res) => {
     `);
 });
 
-// --- PHẦN BOT TELEGRAM ---
+// --- PHẦN BOT TELEGRAM NÂNG CẤP (HỖ TRỢ ĐĂNG NHẬP, THÊM/SỬA/XÓA NHANH) ---
 const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
-let savedChatId = null;
-const steps = [
-    { key: 'tinNguong', label: '🔰 Đánh Giá Tín Ngưỡng' },
-    { key: 'kinhThanh', label: '🔰 Kinh thánh' },
-    { key: 'sachLT', label: '🔰 Sách LT' },
-    { key: 'tapGd', label: '🔰 Tập Gđ' },
-    { key: 'baiMoi', label: '🔰 Bài mới (Phát biểu)' },
-    { key: 'baiCu', label: '🔰 Bài cũ (Phát biểu)' },
-    { key: 'edu', label: '🔰 EDU (Phát biểu)' },
-    { key: 'donThuan', label: '🔰 Đơn Thuần (Truda)' },
-    { key: 'huuHieu', label: '🔰 Hữu Hiệu (Truda)' },
-    { key: 'ketTrai', label: '🔰 Kết trái (Truda)' }
-];
-const sessions = {};
-const persistentKeyboard = Markup.keyboard([['🚀 Bắt Đầu Báo Cáo Nhanh']]).resize();
+const teleSessions = {}; // Quản lý trạng thái thao tác của từng Telegram Chat ID
 
-bot.start((ctx) => { savedChatId = ctx.chat.id; ctx.reply('Bot đã sẵn sàng! Truy cập web để đăng nhập.', persistentKeyboard); });
-bot.hears('🚀 Bắt Đầu Báo Cáo Nhanh', (ctx) => {
-    sessions[ctx.chat.id] = { step: 0, data: {} };
-    ctx.reply('Nhập tên tài khoản (Username) của bạn trên hệ thống:', persistentKeyboard);
+const steps = [
+    { key: 'tinNguong', label: '🔰 Đánh Giá Tín Ngưỡng (0 hoặc 1)' },
+    { key: 'kinhThanh', label: '🔰 Kinh thánh (0 hoặc 1)' },
+    { key: 'sachLT', label: '🔰 Sách LT (0 hoặc 1)' },
+    { key: 'tapGd', label: '🔰 Tập Gđ (0 hoặc 1)' },
+    { key: 'baiMoi', label: '🔰 Bài mới (Nhập số)' },
+    { key: 'baiCu', label: '🔰 Bài cũ (Nhập số)' },
+    { key: 'edu', label: '🔰 EDU (Nhập số)' },
+    { key: 'donThuan', label: '🔰 Đơn Thuần (Nhập số)' },
+    { key: 'huuHieu', label: '🔰 Hữu Hiệu (Nhập số)' },
+    { key: 'ketTrai', label: '🔰 Kết trái (Nhập số)' }
+];
+
+bot.start((ctx) => {
+    teleSessions[ctx.chat.id] = { loggedIn: false };
+    ctx.reply(
+        '🤖 **CHÀO MỪNG ĐẾN VỚI BOT QUẢN LÝ CHIẾN DỊCH**\nVui lòng chọn thao tác bên dưới:',
+        Markup.inlineKeyboard([
+            [Markup.button.callback('🔑 Đăng nhập', 'tele_login')],
+            [Markup.button.callback('📝 Đăng ký tài khoản', 'tele_register')]
+        ])
+    );
 });
 
+// Xử lý nút Đăng nhập trên Telegram
+bot.action('tele_login', (ctx) => {
+    teleSessions[ctx.chat.id] = { step: 'WAITING_LOGIN_USER' };
+    ctx.reply('👉 Vui lòng nhập **Tên đăng nhập (Username)** của bạn:');
+});
+
+// Xử lý nút Đăng ký trên Telegram
+bot.action('tele_register', (ctx) => {
+    teleSessions[ctx.chat.id] = { step: 'WAITING_REG_USER' };
+    ctx.reply('👉 Nhập **Tên đăng nhập mới** bạn muốn tạo:');
+});
+
+// Menu chính trên Telegram sau khi đăng nhập thành công
+function showTeleMenu(ctx) {
+    const session = teleSessions[ctx.chat.id];
+    const username = session.username;
+    const history = loadUserHistory(username);
+    const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
+
+    ctx.reply(
+        `👤 Tài khoản: <b>${username}</b>\n🏆 Tổng điểm tích lũy: <b>${cumulativeScore} điểm</b>\n\nChọn chức năng quản lý:`,
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('➕ Thêm / Cập nhật báo cáo ngày', 'tele_add_report')],
+                [Markup.button.callback('📋 Xem lịch sử & Sửa/Xóa', 'tele_list_report')],
+                [Markup.button.callback('🚪 Đăng xuất', 'tele_logout')]
+            ])
+        }
+    );
+}
+
+bot.action('tele_logout', (ctx) => {
+    delete teleSessions[ctx.chat.id];
+    ctx.reply('Đã đăng xuất thành công! Gõ /start để bắt đầu lại.');
+});
+
+// Bắt đầu quy trình thêm báo cáo nhanh qua Telegram
+bot.action('tele_add_report', (ctx) => {
+    const session = teleSessions[ctx.chat.id];
+    if (!session || !session.loggedIn) return ctx.reply('Vui lòng đăng nhập lại bằng lệnh /start');
+    
+    session.reportStep = 0;
+    session.reportData = {};
+    const today = new Date();
+    session.reportDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+    
+    ctx.reply(`📅 Đang tạo báo cáo cho ngày hôm nay (${session.reportDate}).\n\n👉 **${steps[0].label}:**`);
+});
+
+// Xem danh sách lịch sử kèm nút Sửa/Xóa trực tiếp
+bot.action('tele_list_report', (ctx) => {
+    const session = teleSessions[ctx.chat.id];
+    if (!session || !session.loggedIn) return ctx.reply('Vui lòng đăng nhập lại bằng lệnh /start');
+
+    const history = loadUserHistory(session.username);
+    if (history.length === 0) {
+        return ctx.reply('Chưa có lịch sử báo cáo nào.', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Quay lại Menu', 'tele_menu')]]));
+    }
+
+    ctx.reply('📋 **Lịch sử báo cáo gần đây:**');
+    history.forEach((item, index) => {
+        ctx.reply(
+            `📅 Ngày: <b>${item.date}</b> | 🏆 Điểm: <b>+${item.score} đ</b>`,
+            {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([
+                    [
+                        Markup.button.callback('✏️ Sửa ngày này', `tele_edit_${index}`),
+                        Markup.button.callback('❌ Xóa', `tele_del_${index}`)
+                    ]
+                ])
+            }
+        );
+    });
+});
+
+bot.action('tele_menu', (ctx) => showTeleMenu(ctx));
+
+// Xử lý Xóa lịch sử qua nút bấm Telegram
+bot.action(/tele_del_(\d+)/, (ctx) => {
+    const session = teleSessions[ctx.chat.id];
+    if (!session || !session.loggedIn) return;
+    const index = parseInt(ctx.match[1]);
+
+    let history = loadUserHistory(session.username);
+    if (index >= 0 && index < history.length) {
+        const deleted = history.splice(index, 1)[0];
+        saveUserHistory(session.username, history);
+        const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
+        sendToSignal(`🗑️ **[${session.username}] XÓA BÁO CÁO (TELEGRAM)**\nĐã xóa ngày: ${deleted.date}\n🏆 Tổng điểm tích lũy hiện tại: **${cumulativeScore} điểm**`);
+        ctx.reply(`✅ Đã xóa thành công ngày ${deleted.date}!`);
+        showTeleMenu(ctx);
+    }
+});
+
+// Xử lý Sửa lịch sử qua nút bấm Telegram (Bắt đầu nhập lại dữ liệu cho ngày đó)
+bot.action(/tele_edit_(\d+)/, (ctx) => {
+    const session = teleSessions[ctx.chat.id];
+    if (!session || !session.loggedIn) return;
+    const index = parseInt(ctx.match[1]);
+
+    let history = loadUserHistory(session.username);
+    if (index >= 0 && index < history.length) {
+        const item = history[index];
+        session.reportDate = item.date;
+        session.reportStep = 0;
+        session.reportData = {};
+        ctx.reply(`✏️ Đang sửa báo cáo ngày **${item.date}**.\n\n👉 **${steps[0].label}:**`);
+    }
+});
+
+// Lắng nghe tất cả tin nhắn văn bản điều phối luồng Telegram
 bot.on('text', async (ctx) => {
-    const chatId = ctx.chat.id;
-    const text = ctx.message.text;
-    if (text.startsWith('/') || text === '🚀 Bắt Đầu Báo Cáo Nhanh') return;
+    const text = ctx.message.text.trim();
+    if (text.startsWith('/')) return;
 
-    let session = sessions[chatId];
+    let session = teleSessions[ctx.chat.id];
     if (!session) {
-        return ctx.reply('Hãy bấm nút **🚀 Bắt Đầu Báo Cáo Nhanh** trước nhé!', persistentKeyboard);
+        return ctx.reply('Vui lòng gõ /start để bắt đầu hệ thống.');
     }
 
-    if (session.username === undefined) {
-        session.username = text.trim();
-        session.step = 0;
-        return ctx.reply(`👉 **${steps[0].label}:**`, persistentKeyboard);
+    // 1. Luồng Đăng nhập
+    if (session.step === 'WAITING_LOGIN_USER') {
+        session.tempUser = text;
+        session.step = 'WAITING_LOGIN_PASS';
+        return ctx.reply('👉 Nhập **Mật khẩu** của bạn:');
+    }
+    if (session.step === 'WAITING_LOGIN_PASS') {
+        const users = loadUsers();
+        const user = users.find(u => u.username === session.tempUser && u.password === text);
+        if (user) {
+            session.loggedIn = true;
+            session.username = session.tempUser;
+            delete session.step;
+            ctx.reply('✅ Đăng nhập thành công!');
+            return showTeleMenu(ctx);
+        } else {
+            delete teleSessions[ctx.chat.id];
+            return ctx.reply('❌ Sai tên đăng nhập hoặc mật khẩu! Gõ /start để thử lại.');
+        }
     }
 
-    const currentStep = steps[session.step];
-    session.data[currentStep.key] = text;
-    session.step++;
-
-    if (session.step < steps.length) {
-        const nextStep = steps[session.step];
-        await ctx.reply(`👉 **${nextStep.label}:**`, persistentKeyboard);
-    } else {
-        const today = new Date();
-        const dateStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
-        const { reportContent, summaryContent } = calculateScoreAndContent(session.username, dateStr, session.data);
-
-        await ctx.reply(`📋 **ĐÃ TỔNG HỢP CHO [${session.username}]:**\n\n${reportContent}\n\n${summaryContent}`, persistentKeyboard);
-        try {
-            await sendToSignal(reportContent);
-            setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
-            await ctx.reply('✅ Đã gửi báo cáo sang Signal thành công!', persistentKeyboard);
-        } catch (e) {}
-        delete sessions[chatId];
+    // 2. Luồng Đăng ký
+    if (session.step === 'WAITING_REG_USER') {
+        session.tempRegUser = text;
+        session.step = 'WAITING_REG_PASS';
+        return ctx.reply('👉 Nhập **Mật khẩu mới**:');
     }
+    if (session.step === 'WAITING_REG_PASS') {
+        session.tempRegPass = text;
+        session.step = 'WAITING_REG_SECRET';
+        return ctx.reply('👉 Nhập **Từ khóa bí mật** (dùng khi khôi phục mật khẩu):');
+    }
+    if (session.step === 'WAITING_REG_SECRET') {
+        let users = loadUsers();
+        if (users.some(u => u.username === session.tempRegUser)) {
+            delete teleSessions[ctx.chat.id];
+            return ctx.reply('❌ Tên đăng nhập đã tồn tại! Gõ /start để làm lại.');
+        }
+        users.push({ username: session.tempRegUser, password: session.tempRegPass, secret: text });
+        saveUsers(users);
+        delete teleSessions[ctx.chat.id];
+        return ctx.reply('🎉 Đăng ký thành công! Hãy gõ /start để tiến hành đăng nhập.');
+    }
+
+    // 3. Luồng Nhập/Sửa Báo cáo (10 bước qua Chat)
+    if (session.loggedIn && session.reportStep !== undefined) {
+        const currentStepConfig = steps[session.reportStep];
+        session.reportData[currentStepConfig.key] = text;
+        session.reportStep++;
+
+        if (session.reportStep < steps.length) {
+            const nextStepConfig = steps[session.reportStep];
+            return ctx.reply(`👉 **${nextStepConfig.label}:**`);
+        } else {
+            // Hoàn thành nhập đủ 10 trường -> Tính điểm và lưu trữ
+            const { reportContent, summaryContent } = calculateScoreAndContent(session.username, session.reportDate, session.reportData);
+
+            await ctx.reply(`📋 **KẾT QUẢ GỬI BÁO CÁO (${session.reportDate}):**\n\n${reportContent}\n\n${summaryContent}`);
+            try {
+                await sendToSignal(`📥 **BÁO CÁO [${session.username}] - ${session.reportDate} (TELE)**\n\n` + reportContent);
+                setTimeout(async () => { await sendToSignal(summaryContent); }, 1000);
+                await ctx.reply('✅ Đã đẩy dữ liệu báo cáo sang Signal thành công!');
+            } catch (e) {
+                console.error('Lỗi đẩy tin nhắn sang Signal:', e.message);
+            }
+
+            delete session.reportStep;
+            delete session.reportData;
+            delete session.reportDate;
+            return showTeleMenu(ctx);
+        }
+    }
+
+    ctx.reply('Vui lòng sử dụng các nút bấm hoặc gõ /start để tiếp tục.');
 });
 
 app.listen(PORT, () => { console.log(`Web App đang chạy trên cổng ${PORT}`); });
