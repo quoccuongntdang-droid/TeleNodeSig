@@ -214,7 +214,6 @@ app.get('/', async (req, res) => {
         <table><thead><tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead><tbody id="history-rows">${historyRows.length ? historyRows : '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>'}</tbody></table></div>
         
         <script>
-            // Tự động đồng bộ dữ liệu ngầm mỗi 3 giây từ MongoDB lên web
             setInterval(async () => {
                 const urlParams = new URLSearchParams(window.location.search);
                 const username = urlParams.get('user');
@@ -225,10 +224,8 @@ app.get('/', async (req, res) => {
                     const data = await res.json();
                     if (data.error) return;
 
-                    // Cập nhật tổng điểm tích lũy
                     document.getElementById('total-score').innerText = data.cumulativeScore + ' điểm';
 
-                    // Cập nhật lại bảng lịch sử báo cáo
                     const tbody = document.getElementById('history-rows');
                     if (data.history.length === 0) {
                         tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>';
@@ -263,7 +260,11 @@ app.post('/submit-report', async (req, res) => {
         await sendToSignal(`📥 **BÁO CÁO [${username}] - ${dateStr}**\n\n` + result.reportContent);
         setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
     }
-    res.send(`<body style="text-align:center;padding-top:50px;font-family:Arial;"><h1 style="color:green;">✅ Gửi Báo Cáo Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}" style="display:inline-block;margin-top:20px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;">Quay Lại</a></body>`);
+    res.send(`
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Thành Công</title>
+        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
+        <body><div class="card"><h1>✅ Gửi Báo Cáo Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
+    `);
 });
 
 app.get('/delete', async (req, res) => {
@@ -286,28 +287,52 @@ app.get('/edit', async (req, res) => {
     if (!username) return res.redirect('/login');
     let user = await User.findOne({ username });
     if (!user || isNaN(index) || index < 0 || index >= user.history.length) return res.redirect(`/?user=${encodeURIComponent(username)}`);
+    
     const item = user.history[index];
     const d = item.details || {};
+
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><title>Sửa Ngày ${item.date}</title></head>
-        <body style="font-family:Arial;padding:15px;background:#f4f6f9;"><div style="max-width:500px;margin:0 auto;background:white;padding:20px;border-radius:12px;">
-        <h3>Sửa Ngày: ${item.date} (${username})</h3>
-        <form action="/update-edit" method="POST"><input type="hidden" name="user" value="${username}"><input type="hidden" name="index" value="${index}"><input type="hidden" name="date" value="${item.date}">
-        <div style="background:#34495e;color:white;padding:6px 10px;border-radius:4px;margin-top:15px;font-size:14px;">🌟 MY PAGE</div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="${d.tinNguong ?? 1}" min="0" max="1" style="width:70px;text-align:center;" required></div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="${d.kinhThanh ?? 1}" min="0" max="1" style="width:70px;text-align:center;" required></div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Sách LT:</label><input type="number" name="sachLT" value="${d.sachLT ?? 1}" min="0" max="1" style="width:70px;text-align:center;" required></div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Tập Gđ:</label><input type="number" name="tapGd" value="${d.tapGd ?? 1}" min="0" max="1" style="width:70px;text-align:center;" required></div>
-        <div style="background:#34495e;color:white;padding:6px 10px;border-radius:4px;margin-top:15px;font-size:14px;">🎊 PHÁT BIỂU & EDU</div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Bài mới:</label><input type="number" name="baiMoi" value="${d.baiMoi || 0}" min="0" style="width:70px;text-align:center;" required></div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Bài cũ:</label><input type="number" name="baiCu" value="${d.baiCu || 0}" min="0" style="width:70px;text-align:center;" required></div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>EDU:</label><input type="number" name="edu" value="${d.edu || 0}" min="0" style="width:70px;text-align:center;" required></div>
-        <div style="background:#34495e;color:white;padding:6px 10px;border-radius:4px;margin-top:15px;font-size:14px;">🔥 TRUDA</div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Đơn Thuần:</label><input type="number" name="donThuan" value="${d.donThuan || 0}" min="0" style="width:70px;text-align:center;" required></div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="${d.huuHieu || 0}" min="0" style="width:70px;text-align:center;" required></div>
-        <div style="display:flex;justify-content:space-between;margin:8px 0;"><label>Kết trái:</label><input type="number" name="ketTrai" value="${d.ketTrai || 0}" min="0" style="width:70px;text-align:center;" required></div>
-        <button type="submit" style="width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;margin-top:20px;cursor:pointer;">💾 Lưu Thay Đổi</button></form>
-        <a href="/?user=${encodeURIComponent(username)}" style="display:block;text-align:center;margin-top:15px;color:#555;text-decoration:none;">Quay lại</a></div></body></html>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Sửa Ngày ${item.date} - ${username}</title>
+        <style>
+            body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 15px; }
+            .container { max-width: 550px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+            h3 { text-align: center; color: #2c3e50; margin-bottom: 20px; }
+            .section-title { background: #34495e; color: white; padding: 8px 12px; border-radius: 6px; margin-top: 20px; font-size: 15px; }
+            .form-group { margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+            label { font-size: 14px; color: #333; flex: 2; }
+            input[type="number"] { width: 70px; padding: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; flex: 1; text-align: center; }
+            button { width: 100%; background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; font-size: 16px; font-weight: bold; margin-top: 20px; cursor: pointer; }
+            .back-link { display: block; text-align: center; margin-top: 15px; color: #2980b9; text-decoration: none; font-size: 14px; font-weight: bold; }
+        </style></head>
+        <body>
+            <div class="container">
+                <h3>✏️ Sửa Báo Cáo Ngày: ${item.date}</h3>
+                <form action="/update-edit" method="POST">
+                    <input type="hidden" name="user" value="${username}">
+                    <input type="hidden" name="index" value="${index}">
+                    <input type="hidden" name="date" value="${item.date}">
+                    
+                    <div class="section-title" style="margin-top:0;">🌟 MY PAGE (Nhập 0 hoặc 1)</div>
+                    <div class="form-group" style="margin-top:10px;"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="${d.tinNguong ?? 1}" min="0" max="1" required></div>
+                    <div class="form-group"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="${d.kinhThanh ?? 1}" min="0" max="1" required></div>
+                    <div class="form-group"><label>Sách LT:</label><input type="number" name="sachLT" value="${d.sachLT ?? 1}" min="0" max="1" required></div>
+                    <div class="form-group"><label>Tập Gđ:</label><input type="number" name="tapGd" value="${d.tapGd ?? 1}" min="0" max="1" required></div>
+                    
+                    <div class="section-title">🎊 PHÁT BIỂU & EDU</div>
+                    <div class="form-group" style="margin-top:10px;"><label>Bài mới:</label><input type="number" name="baiMoi" value="${d.baiMoi || 0}" min="0" required></div>
+                    <div class="form-group"><label>Bài cũ:</label><input type="number" name="baiCu" value="${d.baiCu || 0}" min="0" required></div>
+                    <div class="form-group"><label>EDU:</label><input type="number" name="edu" value="${d.edu || 0}" min="0" required></div>
+                    
+                    <div class="section-title">🔥 TRUDA</div>
+                    <div class="form-group" style="margin-top:10px;"><label>Đơn Thuần:</label><input type="number" name="donThuan" value="${d.donThuan || 0}" min="0" required></div>
+                    <div class="form-group"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="${d.huuHieu || 0}" min="0" required></div>
+                    <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="${d.ketTrai || 0}" min="0" required></div>
+                    
+                    <button type="submit">💾 Lưu Thay Đổi</button>
+                </form>
+                <a href="/?user=${encodeURIComponent(username)}" class="back-link">⬅️ Quay lại trang chủ</a>
+            </div>
+        </body></html>
     `);
 });
 
@@ -319,7 +344,11 @@ app.post('/update-edit', async (req, res) => {
         await sendToSignal(`✏️ **[${username}] CẬP NHẬT NGÀY ${dateStr}**\n\n` + result.reportContent);
         setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
     }
-    res.send(`<body style="text-align:center;padding-top:50px;font-family:Arial;"><h1 style="color:green;">✅ Đã Sửa Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}" style="display:inline-block;margin-top:20px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;">Quay Lại</a></body>`);
+    res.send(`
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Đã Sửa</title>
+        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
+        <body><div class="card"><h1>✅ Đã Sửa Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
+    `);
 });
 
 // --- PHẦN BOT TELEGRAM NÂNG CẤP ---
