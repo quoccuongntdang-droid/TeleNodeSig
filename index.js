@@ -112,7 +112,9 @@ app.get('/api/data', async (req, res) => {
 // --- CÁC TRANG WEB ---
 app.get('/login', (req, res) => {
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Đăng Nhập</title>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Đăng Nhập</title>
+        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>🔐 Đăng Nhập</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-login" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><button type="submit">Đăng Nhập</button></form>
@@ -129,7 +131,9 @@ app.post('/auth-login', async (req, res) => {
 
 app.get('/register', (req, res) => {
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Đăng Ký</title>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Đăng Ký</title>
+        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>📝 Đăng Ký</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-register" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><input type="text" name="secret" placeholder="Từ khóa bí mật" required><button type="submit">Đăng Ký</button></form>
@@ -151,7 +155,9 @@ app.post('/auth-register', async (req, res) => {
 
 app.get('/forgot', (req, res) => {
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Quên Mật Khẩu</title>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Khôi Phục</title>
+        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#e67e22;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>🔑 Khôi Phục</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-forgot" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="text" name="secret" placeholder="Từ khóa bí mật" required><input type="password" name="newPassword" placeholder="Mật khẩu mới" required><button type="submit">Đổi Mật Khẩu</button></form>
@@ -190,7 +196,9 @@ app.get('/', async (req, res) => {
     `).join('');
 
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Dashboard - ${username}</title>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - ${username}</title>
+        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;margin:0;padding:15px}.container{max-width:550px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}h2,h3{text-align:center;color:#2c3e50}.top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}.section-title{background:#34495e;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}.form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}label{font-size:14px;color:#333;flex:2}input[type="number"],input[type="date"]{width:70px;padding:6px;text-align:center;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:20px;cursor:pointer}.stats-box{background:#e8f8f5;border:1px solid #a3e4d7;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}th{background:#ecf0f1;padding:8px}</style></head>
         <body><div class="container"><div class="top-bar"><span>Xin chào, <b>${username}</b></span><a href="/login" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a></div>
         <h2>🚀 Quản Lý Chiến Dịch</h2><div class="stats-box">🏆 Tổng điểm tích lũy: <b id="total-score" style="color:#27ae60;font-size:18px;">${cumulativeScore} điểm</b></div>
@@ -261,7 +269,9 @@ app.post('/submit-report', async (req, res) => {
         setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
     }
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Thành Công</title>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Thành Công</title>
+        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
         <body><div class="card"><h1>✅ Gửi Báo Cáo Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
     `);
@@ -292,7 +302,9 @@ app.get('/edit', async (req, res) => {
     const d = item.details || {};
 
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Sửa Ngày ${item.date} - ${username}</title>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Sửa Ngày ${item.date}</title>
+        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
         <style>
             body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 15px; }
             .container { max-width: 550px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
@@ -345,7 +357,9 @@ app.post('/update-edit', async (req, res) => {
         setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
     }
     res.send(`
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Đã Sửa</title>
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Đã Sửa</title>
+        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
         <body><div class="card"><h1>✅ Đã Sửa Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
     `);
