@@ -97,6 +97,18 @@ async function calculateScoreAndContent(username, dateStr, d) {
     return { reportContent, summaryContent };
 }
 
+// --- API CUNG CẤP JSON CHO WEB TỰ ĐỘNG CẬP NHẬT ---
+app.get('/api/data', async (req, res) => {
+    const username = req.query.user;
+    if (!username) return res.json({ error: 'Unauthorized' });
+    const user = await User.findOne({ username });
+    if (!user) return res.json({ error: 'User not found' });
+    
+    const history = user.history || [];
+    const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
+    res.json({ cumulativeScore, history });
+});
+
 // --- CÁC TRANG WEB ---
 app.get('/login', (req, res) => {
     res.send(`
@@ -181,7 +193,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Dashboard - ${username}</title>
         <style>body{font-family:Arial;background:#f4f6f9;margin:0;padding:15px}.container{max-width:550px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}h2,h3{text-align:center;color:#2c3e50}.top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}.section-title{background:#34495e;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}.form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}label{font-size:14px;color:#333;flex:2}input[type="number"],input[type="date"]{width:70px;padding:6px;text-align:center;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:20px;cursor:pointer}.stats-box{background:#e8f8f5;border:1px solid #a3e4d7;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}th{background:#ecf0f1;padding:8px}</style></head>
         <body><div class="container"><div class="top-bar"><span>Xin chào, <b>${username}</b></span><a href="/login" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a></div>
-        <h2>🚀 Quản Lý Chiến Dịch</h2><div class="stats-box">🏆 Tổng điểm tích lũy: <b style="color:#27ae60;font-size:18px;">${cumulativeScore} điểm</b></div>
+        <h2>🚀 Quản Lý Chiến Dịch</h2><div class="stats-box">🏆 Tổng điểm tích lũy: <b id="total-score" style="color:#27ae60;font-size:18px;">${cumulativeScore} điểm</b></div>
         <form action="/submit-report?user=${encodeURIComponent(username)}" method="POST">
         <div class="section-title">📅 CHỌN NGÀY BÁO CÁO</div><div class="form-group" style="margin-top:10px;"><label>Ngày báo cáo:</label><input type="date" name="reportDate" value="${defaultDateStr}" required></div>
         <div class="section-title">🌟 MY PAGE (0 hoặc 1)</div>
@@ -199,7 +211,45 @@ app.get('/', async (req, res) => {
         <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="0" min="0" required></div>
         <button type="submit">📤 Gửi Báo Cáo</button></form>
         <div class="section-title" style="margin-top:30px;">📋 Lịch Sử Báo Cáo</div>
-        <table><thead><tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead><tbody>${historyRows.length ? historyRows : '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>'}</tbody></table></div></body></html>
+        <table><thead><tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead><tbody id="history-rows">${historyRows.length ? historyRows : '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>'}</tbody></table></div>
+        
+        <script>
+            // Tự động đồng bộ dữ liệu ngầm mỗi 3 giây từ MongoDB lên web
+            setInterval(async () => {
+                const urlParams = new URLSearchParams(window.location.search);
+                const username = urlParams.get('user');
+                if (!username) return;
+
+                try {
+                    const res = await fetch(\`/api/data?user=\${encodeURIComponent(username)}\`);
+                    const data = await res.json();
+                    if (data.error) return;
+
+                    // Cập nhật tổng điểm tích lũy
+                    document.getElementById('total-score').innerText = data.cumulativeScore + ' điểm';
+
+                    // Cập nhật lại bảng lịch sử báo cáo
+                    const tbody = document.getElementById('history-rows');
+                    if (data.history.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>';
+                    } else {
+                        tbody.innerHTML = data.history.map((item, index) => \`
+                            <tr>
+                                <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">\${item.date}</td>
+                                <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;font-weight:bold;color:#27ae60;">+\${item.score} đ</td>
+                                <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">
+                                    <a href="/edit?user=\${encodeURIComponent(username)}&index=\${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
+                                    <a href="/delete?user=\${encodeURIComponent(username)}&index=\${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
+                                </td>
+                            </tr>
+                        \`).join('');
+                    }
+                } catch (e) {
+                    console.error('Lỗi đồng bộ dữ liệu:', e);
+                }
+            }, 3000);
+        </script>
+        </body></html>
     `);
 });
 
