@@ -2,6 +2,7 @@ const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const express = require('express');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,6 +12,10 @@ const APIKEY = '911098';
 const FAVICON_URL = 'https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg';
 const BOT_TOKEN = '9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E';
 const WEBHOOK_PATH = '/webhook/telegraf';
+
+// Thời gian rời khỏi tab tối đa trước khi tự động đăng xuất (mặc định: 2 phút)
+const AWAY_TIMEOUT_MS = 2 * 60 * 1000;
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 const bot = new Telegraf(BOT_TOKEN);
 
@@ -25,7 +30,6 @@ mongoose.connect(MONGO_URI)
     .then(() => console.log('✅ Đã kết nối MongoDB Atlas thành công!'))
     .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err.message));
 
-// Định nghĩa cấu trúc dữ liệu User và Lịch sử trên Database
 const userSchema = new mongoose.Schema({
     username: { type: String, unique: true, required: true },
     password: { type: String, required: true },
@@ -39,6 +43,41 @@ const userSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model('User', userSchema);
+
+// --- QUẢN LÝ PHIÊN ĐĂNG NHẬP BẢO MẬT ---
+const activeSessions = new Map();
+
+function createSession(username, role) {
+    const token = crypto.randomBytes(24).toString('hex');
+    const now = Date.now();
+    activeSessions.set(token, {
+        username,
+        role: role || 'user',
+        createdAt: now,
+        lastActive: now
+    });
+    return token;
+}
+
+function getValidSession(token, expectedUsername) {
+    if (!token) return null;
+    const sess = activeSessions.get(token);
+    if (!sess) return null;
+    const now = Date.now();
+    if (now - sess.createdAt > SESSION_TTL_MS || now - sess.lastActive > AWAY_TIMEOUT_MS + 30000) {
+        activeSessions.delete(token);
+        return null;
+    }
+    if (expectedUsername && sess.username !== expectedUsername) {
+        return null;
+    }
+    sess.lastActive = now;
+    return sess;
+}
+
+function revokeSession(token) {
+    if (token) activeSessions.delete(token);
+}
 
 // --- HÀM GỬI SIGNAL ---
 async function sendToSignal(message) {
@@ -54,6 +93,28 @@ async function verifyAdmin(username) {
     if (!username) return null;
     const adminUser = await User.findOne({ username, role: 'admin' });
     return adminUser;
+}
+
+async function authorizeRequest(req, requiredAdmin = false) {
+    const token = req.query.token || req.body?.token || '';
+    const requestedUser = requiredAdmin
+        ? (req.query.admin || req.body?.admin || '')
+        : (req.query.user || req.body?.user || '');
+
+    const sess = getValidSession(token, requestedUser || null);
+    if (!sess) return null;
+
+    const dbUser = await User.findOne({ username: sess.username });
+    if (!dbUser) {
+        revokeSession(token);
+        return null;
+    }
+
+    if (requiredAdmin && dbUser.role !== 'admin') {
+        return null;
+    }
+
+    return { token, username: dbUser.username, role: dbUser.role || 'user', dbUser };
 }
 
 // --- TÍNH TOÁN VÀ LƯU DATABASE ---
@@ -111,16 +172,124 @@ async function calculateScoreAndContent(username, dateStr, d) {
     return { reportContent, summaryContent };
 }
 
-// --- API CUNG CẤP JSON CHO WEB TỰ ĐỘNG CẬP NHẬT ---
-app.get('/api/data', async (req, res) => {
-    const username = req.query.user;
-    if (!username) return res.json({ error: 'Unauthorized' });
-    const user = await User.findOne({ username });
-    if (!user) return res.json({ error: 'User not found' });
+function buildTabGuardScript(token, awayTimeoutMs) {
+    return `
+        <script>
+            (function() {
+                const TAB_TOKEN = ${JSON.stringify(token)};
+                const AWAY_LIMIT = ${awayTimeoutMs};
+                const STORAGE_KEY = 'cd60_tab_token';
+                const AWAY_KEY = 'cd60_tab_hidden_at';
 
-    const history = user.history || [];
+                if (TAB_TOKEN) {
+                    const saved = sessionStorage.getItem(STORAGE_KEY);
+                    if (!saved) {
+                        sessionStorage.setItem(STORAGE_KEY, TAB_TOKEN);
+                    } else if (saved !== TAB_TOKEN) {
+                        sessionStorage.removeItem(AWAY_KEY);
+                        window.location.replace('/login?err=' + encodeURIComponent('Phiên tab không khớp. Vui lòng đăng nhập lại!'));
+                        return;
+                    }
+                }
+
+                function kickOut(reason) {
+                    const tk = sessionStorage.getItem(STORAGE_KEY) || TAB_TOKEN || '';
+                    sessionStorage.removeItem(STORAGE_KEY);
+                    sessionStorage.removeItem(AWAY_KEY);
+                    if (tk) {
+                        fetch('/api/logout?token=' + encodeURIComponent(tk), { method: 'POST' }).catch(() => {});
+                    }
+                    window.location.replace('/login?err=' + encodeURIComponent(reason));
+                }
+
+                function checkAwayElapsed() {
+                    const hiddenAt = Number(sessionStorage.getItem(AWAY_KEY) || 0);
+                    if (hiddenAt > 0 && (Date.now() - hiddenAt) >= AWAY_LIMIT) {
+                        kickOut('Bạn đã rời khỏi tab quá thời gian quy định nên hệ thống tự động đăng xuất.');
+                        return true;
+                    }
+                    return false;
+                }
+
+                document.addEventListener('visibilitychange', () => {
+                    if (document.hidden) {
+                        sessionStorage.setItem(AWAY_KEY, String(Date.now()));
+                    } else {
+                        if (!checkAwayElapsed()) {
+                            sessionStorage.removeItem(AWAY_KEY);
+                            if (typeof window.syncNow === 'function') {
+                                window.syncNow();
+                            }
+                        }
+                    }
+                });
+
+                window.addEventListener('focus', () => {
+                    if (!checkAwayElapsed()) {
+                        sessionStorage.removeItem(AWAY_KEY);
+                        if (typeof window.syncNow === 'function') {
+                            window.syncNow();
+                        }
+                    }
+                });
+
+                setInterval(() => {
+                    if (document.hidden) {
+                        checkAwayElapsed();
+                    }
+                }, 5000);
+            })();
+        </script>
+    `;
+}
+
+// --- API ĐỒNG BỘ & ĐĂNG XUẤT ---
+app.post('/api/logout', (req, res) => {
+    const token = req.query.token || req.body?.token;
+    revokeSession(token);
+    res.json({ ok: true });
+});
+
+app.get('/api/data', async (req, res) => {
+    const auth = await authorizeRequest(req, false);
+    if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+
+    const history = auth.dbUser.history || [];
     const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
-    res.json({ cumulativeScore, history });
+    res.json({ cumulativeScore, history, role: auth.role });
+});
+
+app.get('/api/admin-data', async (req, res) => {
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.status(401).json({ error: 'Unauthorized' });
+
+    const allUsers = await User.find({}).sort({ username: 1 });
+    let totalSystemScore = 0;
+    let totalReportsCount = 0;
+
+    const usersPayload = allUsers.map(u => {
+        const uHistory = u.history || [];
+        const uScore = uHistory.reduce((sum, item) => sum + (item.score || 0), 0);
+        totalSystemScore += uScore;
+        totalReportsCount += uHistory.length;
+        return {
+            username: u.username,
+            role: u.role || 'user',
+            score: uScore,
+            history: uHistory.map((item, idx) => ({
+                index: idx,
+                date: item.date,
+                score: item.score || 0
+            }))
+        };
+    });
+
+    res.json({
+        totalUsers: allUsers.length,
+        totalReportsCount,
+        totalSystemScore,
+        users: usersPayload
+    });
 });
 
 // --- CÁC TRANG WEB ---
@@ -132,7 +301,9 @@ app.get('/login', (req, res) => {
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}.notice{color:#27ae60;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>🔐 Đăng Nhập</h2>${req.query.msg ? `<div class="notice">${req.query.msg}</div>` : ''}${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-login" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><button type="submit">Đăng Nhập</button></form>
-        <div style="display:flex;justify-content:space-between;margin-top:15px;font-size:13px;"><a href="/register">Đăng ký</a><a href="/forgot">Quên mật khẩu?</a></div></div></body></html>
+        <div style="display:flex;justify-content:space-between;margin-top:15px;font-size:13px;"><a href="/register">Đăng ký</a><a href="/forgot">Quên mật khẩu?</a></div></div>
+        <script>sessionStorage.removeItem('cd60_tab_token'); sessionStorage.removeItem('cd60_tab_hidden_at');</script>
+        </body></html>
     `);
 });
 
@@ -140,8 +311,16 @@ app.post('/auth-login', async (req, res) => {
     const { username, password } = req.body;
     const user = await User.findOne({ username, password });
     if (!user) return res.redirect('/login?err=Sai+tên+đăng+nhập+hoặc+mật+khẩu!');
-    if (user.role === 'admin') return res.redirect(`/admin?admin=${encodeURIComponent(username)}`);
-    return res.redirect(`/?user=${encodeURIComponent(username)}`);
+    const token = createSession(user.username, user.role || 'user');
+    if (user.role === 'admin') {
+        return res.redirect(`/admin?admin=${encodeURIComponent(user.username)}&token=${encodeURIComponent(token)}`);
+    }
+    return res.redirect(`/?user=${encodeURIComponent(user.username)}&token=${encodeURIComponent(token)}`);
+});
+
+app.get('/logout', (req, res) => {
+    revokeSession(req.query.token);
+    res.redirect('/login');
 });
 
 app.get('/register', (req, res) => {
@@ -194,10 +373,11 @@ app.post('/auth-forgot', async (req, res) => {
 
 // --- TRANG ADMIN QUẢN TRỊ TẤT CẢ TÀI KHOẢN & BÁO CÁO ---
 app.get('/admin', async (req, res) => {
-    const adminName = req.query.admin;
-    const adminUser = await verifyAdmin(adminName);
-    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn+hoặc+không+có+quyền+Admin!');
 
+    const adminName = auth.username;
+    const token = auth.token;
     const allUsers = await User.find({}).sort({ username: 1 });
     const now = new Date();
     const defaultDateStr = now.toISOString().split('T')[0];
@@ -233,8 +413,8 @@ app.get('/admin', async (req, res) => {
                     <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.date}</td>
                     <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#27ae60;">+${item.score} đ</td>
                     <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
-                        <a href="/admin-edit?admin=${encodeURIComponent(adminName)}&target=${encodeURIComponent(u.username)}&index=${idx}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
-                        <a href="/admin-delete?admin=${encodeURIComponent(adminName)}&target=${encodeURIComponent(u.username)}&index=${idx}" onclick="return confirm('Xóa báo cáo ngày ${item.date} của ${u.username}?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
+                        <a href="/admin-edit?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&target=${encodeURIComponent(u.username)}&index=${idx}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
+                        <a href="/admin-delete?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&target=${encodeURIComponent(u.username)}&index=${idx}" onclick="return confirm('Xóa báo cáo ngày ${item.date} của ${u.username}?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
                     </td>
                 </tr>
             `).join('')
@@ -242,7 +422,7 @@ app.get('/admin', async (req, res) => {
 
         const deleteUserBtn = u.username === adminName
             ? `<span style="font-size:11px;color:#888;background:#edf2f7;padding:4px 8px;border-radius:4px;">Tài khoản hiện tại</span>`
-            : `<a href="/admin-delete-user?admin=${encodeURIComponent(adminName)}&target=${encodeURIComponent(u.username)}" onclick="return confirm('XÓA VĨNH VIỄN tài khoản ${u.username} và toàn bộ báo cáo của tài khoản này?');" style="background:#c0392b;color:white;padding:5px 10px;text-decoration:none;border-radius:5px;font-size:12px;font-weight:bold;">🗑️ Xóa tài khoản</a>`;
+            : `<a href="/admin-delete-user?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&target=${encodeURIComponent(u.username)}" onclick="return confirm('XÓA VĨNH VIỄN tài khoản ${u.username} và toàn bộ báo cáo của tài khoản này?');" style="background:#c0392b;color:white;padding:5px 10px;text-decoration:none;border-radius:5px;font-size:12px;font-weight:bold;">🗑️ Xóa tài khoản</a>`;
 
         return `
             <div style="border:1px solid #dce4ec;border-radius:10px;padding:12px;margin-top:15px;background:#fafbfd;">
@@ -252,7 +432,7 @@ app.get('/admin', async (req, res) => {
                 </div>
 
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:#f1f5f9;padding:8px 10px;border-radius:7px;margin-bottom:10px;">
-                    <form action="/admin-change-password?admin=${encodeURIComponent(adminName)}" method="POST" style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px;margin:0;">
+                    <form action="/admin-change-password?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}" method="POST" style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px;margin:0;">
                         <input type="hidden" name="targetUser" value="${u.username}">
                         <input type="text" name="newPassword" placeholder="Mật khẩu mới..." required style="padding:5px 8px;border:1px solid #cbd5e0;border-radius:5px;font-size:12px;flex:1;min-width:110px;">
                         <button type="submit" style="width:auto;margin:0;padding:5px 10px;font-size:12px;background:#2980b9;border-radius:5px;">🔑 Đổi MK</button>
@@ -305,15 +485,15 @@ app.get('/admin', async (req, res) => {
                 <div class="top-bar">
                     <span>🛡️ Admin: <b>${adminName}</b></span>
                     <div>
-                        <a href="/?user=${encodeURIComponent(adminName)}" style="color:#2980b9;text-decoration:none;font-weight:bold;margin-right:12px;">Trang Cá Nhân</a>
-                        <a href="/login" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a>
+                        <a href="/?user=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}" style="color:#2980b9;text-decoration:none;font-weight:bold;margin-right:12px;">Trang Cá Nhân</a>
+                        <a href="/logout?token=${encodeURIComponent(token)}" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a>
                     </div>
                 </div>
                 <h2>🛠️ Quản Trị Toàn Hệ Thống</h2>
                 ${statusBanner}
                 <div class="stats-box">
-                    👥 Tài khoản: <b>${allUsers.length}</b> | 📋 Tổng báo cáo: <b>${totalReportsCount}</b><br>
-                    🏆 Tổng điểm toàn hệ thống: <b style="color:#27ae60;font-size:18px;">${totalSystemScore} điểm</b>
+                    👥 Tài khoản: <b id="adm-total-users">${allUsers.length}</b> | 📋 Tổng báo cáo: <b id="adm-total-reports">${totalReportsCount}</b><br>
+                    🏆 Tổng điểm toàn hệ thống: <b id="adm-total-score" style="color:#27ae60;font-size:18px;">${totalSystemScore} điểm</b>
                 </div>
 
                 <div class="filter-card">
@@ -340,7 +520,7 @@ app.get('/admin', async (req, res) => {
                     </div>
                 </div>
 
-                <form action="/admin-add?admin=${encodeURIComponent(adminName)}" method="POST">
+                <form action="/admin-add?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}" method="POST">
                     <div class="section-title">➕ ADMIN THÊM BÁO CÁO CHO TÀI KHOẢN</div>
                     <div class="form-group" style="margin-top:10px;"><label>Chọn tài khoản:</label><select name="targetUser" required>${userOptions}</select></div>
                     <div class="form-group"><label>Ngày báo cáo:</label><input type="date" name="reportDate" value="${defaultDateStr}" required></div>
@@ -370,9 +550,11 @@ app.get('/admin', async (req, res) => {
                 </div>
             </div>
 
+            ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
             <script>
                 const ADMIN_NAME = ${JSON.stringify(adminName)};
-                const ALL_USERS_DATA = ${serializedUsersJson};
+                const SESSION_TOKEN = ${JSON.stringify(token)};
+                let ALL_USERS_DATA = ${serializedUsersJson};
 
                 const searchUserInput = document.getElementById('searchUser');
                 const filterDateInput = document.getElementById('filterDate');
@@ -430,8 +612,8 @@ app.get('/admin', async (req, res) => {
                             <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">\${r.date}</td>
                             <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#27ae60;">+\${r.score} đ</td>
                             <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">
-                                <a href="/admin-edit?admin=\${encodeURIComponent(ADMIN_NAME)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" style="background:#f39c12;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;margin-right:4px;">Sửa</a>
-                                <a href="/admin-delete?admin=\${encodeURIComponent(ADMIN_NAME)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" onclick="return confirm('Xóa báo cáo ngày \${r.date} của \${r.username}?');" style="background:#e74c3c;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;">Xóa</a>
+                                <a href="/admin-edit?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" style="background:#f39c12;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;margin-right:4px;">Sửa</a>
+                                <a href="/admin-delete?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" onclick="return confirm('Xóa báo cáo ngày \${r.date} của \${r.username}?');" style="background:#e74c3c;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;">Xóa</a>
                             </td>
                         </tr>
                     \`).join('');
@@ -450,60 +632,84 @@ app.get('/admin', async (req, res) => {
                     renderLiveFilterSection();
                 }
 
+                window.syncNow = async function() {
+                    if (document.hidden) return;
+                    try {
+                        const res = await fetch(\`/api/admin-data?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}\`);
+                        if (res.status === 401) {
+                            window.location.replace('/login?err=' + encodeURIComponent('Phiên đăng nhập đã hết hạn!'));
+                            return;
+                        }
+                        const data = await res.json();
+                        if (!data || data.error) return;
+                        document.getElementById('adm-total-users').innerText = data.totalUsers;
+                        document.getElementById('adm-total-reports').innerText = data.totalReportsCount;
+                        document.getElementById('adm-total-score').innerText = data.totalSystemScore + ' điểm';
+                        ALL_USERS_DATA = data.users;
+                        renderLiveFilterSection();
+                    } catch (e) {}
+                };
+
                 searchUserInput.addEventListener('input', renderLiveFilterSection);
                 filterDateInput.addEventListener('change', renderLiveFilterSection);
                 renderLiveFilterSection();
+                setInterval(window.syncNow, 2500);
             </script>
         </body></html>
     `);
 });
 
 app.post('/admin-change-password', async (req, res) => {
-    const adminName = req.query.admin;
-    const adminUser = await verifyAdmin(adminName);
-    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn+hoặc+không+có+quyền+Admin!');
 
+    const adminName = auth.username;
+    const token = auth.token;
     const { targetUser, newPassword } = req.body;
+
     if (!targetUser || !newPassword || !newPassword.trim()) {
-        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&err=${encodeURIComponent('Mật khẩu mới không được để trống!')}`);
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&err=${encodeURIComponent('Mật khẩu mới không được để trống!')}`);
     }
 
     const targetDoc = await User.findOne({ username: targetUser });
     if (!targetDoc) {
-        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&err=${encodeURIComponent('Không tìm thấy tài khoản!')}`);
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&err=${encodeURIComponent('Không tìm thấy tài khoản!')}`);
     }
 
     targetDoc.password = newPassword.trim();
     await targetDoc.save();
     await sendToSignal(`🛡️ **[ADMIN: ${adminName}] ĐÃ ĐỔI MẬT KHẨU CHO TÀI KHOẢN [${targetUser}]**`);
 
-    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&msg=${encodeURIComponent(`✅ Đã đổi mật khẩu cho tài khoản ${targetUser}!`)}`);
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&msg=${encodeURIComponent(`✅ Đã đổi mật khẩu cho tài khoản ${targetUser}!`)}`);
 });
 
 app.get('/admin-delete-user', async (req, res) => {
-    const adminName = req.query.admin;
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn+hoặc+không+có+quyền+Admin!');
+
+    const adminName = auth.username;
+    const token = auth.token;
     const targetUser = req.query.target;
-    const adminUser = await verifyAdmin(adminName);
-    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
 
     if (!targetUser || targetUser === adminName) {
-        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&err=${encodeURIComponent('Không thể xóa tài khoản Admin đang đăng nhập!')}`);
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&err=${encodeURIComponent('Không thể xóa tài khoản Admin đang đăng nhập!')}`);
     }
 
     const deleted = await User.findOneAndDelete({ username: targetUser });
     if (deleted) {
         await sendToSignal(`🛡️ **[ADMIN: ${adminName}] ĐÃ XÓA TÀI KHOẢN [${targetUser}]**`);
-        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&msg=${encodeURIComponent(`🗑️ Đã xóa tài khoản ${targetUser}!`)}`);
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&msg=${encodeURIComponent(`🗑️ Đã xóa tài khoản ${targetUser}!`)}`);
     }
 
-    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}`);
 });
 
 app.post('/admin-add', async (req, res) => {
-    const adminName = req.query.admin;
-    const adminUser = await verifyAdmin(adminName);
-    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn+hoặc+không+có+quyền+Admin!');
 
+    const adminName = auth.username;
+    const token = auth.token;
     const targetUser = req.body.targetUser;
     const rawDate = req.body.reportDate;
     const dateStr = rawDate ? rawDate.split('-').reverse().join('/') : new Date().toLocaleDateString('vi-VN');
@@ -514,20 +720,21 @@ app.post('/admin-add', async (req, res) => {
         setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
     }
 
-    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}`);
 });
 
 app.get('/admin-edit', async (req, res) => {
-    const adminName = req.query.admin;
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn+hoặc+không+có+quyền+Admin!');
+
+    const adminName = auth.username;
+    const token = auth.token;
     const targetUser = req.query.target;
     const index = parseInt(req.query.index);
 
-    const adminUser = await verifyAdmin(adminName);
-    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
-
     const user = await User.findOne({ username: targetUser });
     if (!user || isNaN(index) || index < 0 || index >= user.history.length) {
-        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}`);
     }
 
     const item = user.history[index];
@@ -551,8 +758,7 @@ app.get('/admin-edit', async (req, res) => {
         <body>
             <div class="container">
                 <h3>🛡️ Admin Sửa Ngày ${item.date} của [${targetUser}]</h3>
-                <form action="/admin-update" method="POST">
-                    <input type="hidden" name="admin" value="${adminName}">
+                <form action="/admin-update?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}" method="POST">
                     <input type="hidden" name="target" value="${targetUser}">
                     <input type="hidden" name="date" value="${item.date}">
 
@@ -574,33 +780,37 @@ app.get('/admin-edit', async (req, res) => {
 
                     <button type="submit">💾 Lưu Thay Đổi</button>
                 </form>
-                <a href="/admin?admin=${encodeURIComponent(adminName)}" class="back-link">⬅️ Quay lại trang Admin</a>
+                <a href="/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}" class="back-link">⬅️ Quay lại trang Admin</a>
             </div>
+            ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
         </body></html>
     `);
 });
 
 app.post('/admin-update', async (req, res) => {
-    const { admin: adminName, target: targetUser, date: dateStr } = req.body;
-    const adminUser = await verifyAdmin(adminName);
-    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn+hoặc+không+có+quyền+Admin!');
 
+    const adminName = auth.username;
+    const token = auth.token;
+    const { target: targetUser, date: dateStr } = req.body;
     const result = await calculateScoreAndContent(targetUser, dateStr, req.body);
     if (result) {
         await sendToSignal(`🛡️ **[ADMIN: ${adminName}] CẬP NHẬT CHO [${targetUser}] - NGÀY ${dateStr}**\n\n` + result.reportContent);
         setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
     }
 
-    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}`);
 });
 
 app.get('/admin-delete', async (req, res) => {
-    const adminName = req.query.admin;
+    const auth = await authorizeRequest(req, true);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn+hoặc+không+có+quyền+Admin!');
+
+    const adminName = auth.username;
+    const token = auth.token;
     const targetUser = req.query.target;
     const index = parseInt(req.query.index);
-
-    const adminUser = await verifyAdmin(adminName);
-    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
 
     const user = await User.findOne({ username: targetUser });
     if (user && !isNaN(index) && index >= 0 && index < user.history.length) {
@@ -610,15 +820,17 @@ app.get('/admin-delete', async (req, res) => {
         await sendToSignal(`🛡️ **[ADMIN: ${adminName}] XÓA BÁO CÁO CỦA [${targetUser}]**\nĐã xóa ngày: ${deletedDay.date}\n🏆 Tổng điểm [${targetUser}]: **${cumulativeScore} điểm**`);
     }
 
-    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}`);
 });
 
 // --- TRANG DASHBOARD CÁ NHÂN ---
 app.get('/', async (req, res) => {
-    const username = req.query.user;
-    if (!username) return res.redirect('/login');
-    const user = await User.findOne({ username });
-    if (!user) return res.redirect('/login');
+    const auth = await authorizeRequest(req, false);
+    if (!auth) return res.redirect('/login?err=Vui+lòng+đăng+nhập+hoặc+phiên+đã+hết+hạn!');
+
+    const username = auth.username;
+    const token = auth.token;
+    const user = auth.dbUser;
 
     const history = user.history || [];
     const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
@@ -628,12 +840,12 @@ app.get('/', async (req, res) => {
         <tr><td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">${item.date}</td>
         <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;font-weight:bold;color:#27ae60;">+${item.score} đ</td>
         <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">
-        <a href="/edit?user=${encodeURIComponent(username)}&index=${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
-        <a href="/delete?user=${encodeURIComponent(username)}&index=${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a></td></tr>
+        <a href="/edit?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}&index=${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
+        <a href="/delete?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}&index=${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a></td></tr>
     `).join('');
 
     const adminLink = user.role === 'admin'
-        ? `<a href="/admin?admin=${encodeURIComponent(username)}" style="color:#8e44ad;text-decoration:none;font-weight:bold;margin-right:12px;">🛡️ Trang Admin</a>`
+        ? `<a href="/admin?admin=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}" style="color:#8e44ad;text-decoration:none;font-weight:bold;margin-right:12px;">🛡️ Trang Admin</a>`
         : '';
 
     res.send(`
@@ -641,9 +853,9 @@ app.get('/', async (req, res) => {
         <title>🌐 Chiến Dịch 60 Ngày - ${username}</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;margin:0;padding:15px}.container{max-width:550px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}h2,h3{text-align:center;color:#2c3e50}.top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}.section-title{background:#34495e;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}.form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}label{font-size:14px;color:#333;flex:2}input[type="number"],input[type="date"]{width:70px;padding:6px;text-align:center;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:20px;cursor:pointer}.stats-box{background:#e8f8f5;border:1px solid #a3e4d7;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}th{background:#ecf0f1;padding:8px}</style></head>
-        <body><div class="container"><div class="top-bar"><span>Xin chào, <b>${username}</b></span><div>${adminLink}<a href="/login" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a></div></div>
+        <body><div class="container"><div class="top-bar"><span>Xin chào, <b>${username}</b></span><div>${adminLink}<a href="/logout?token=${encodeURIComponent(token)}" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a></div></div>
         <h2>🚀 Quản Lý Chiến Dịch</h2><div class="stats-box">🏆 Tổng điểm tích lũy: <b id="total-score" style="color:#27ae60;font-size:18px;">${cumulativeScore} điểm</b></div>
-        <form action="/submit-report?user=${encodeURIComponent(username)}" method="POST">
+        <form action="/submit-report?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}" method="POST">
         <div class="section-title">📅 CHỌN NGÀY BÁO CÁO</div><div class="form-group" style="margin-top:10px;"><label>Ngày báo cáo:</label><input type="date" name="reportDate" value="${defaultDateStr}" required></div>
         <div class="section-title">🌟 MY PAGE (0 hoặc 1)</div>
         <div class="form-group"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="1" min="0" max="1" required></div>
@@ -662,21 +874,26 @@ app.get('/', async (req, res) => {
         <div class="section-title" style="margin-top:30px;">📋 Lịch Sử Báo Cáo</div>
         <table><thead><tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead><tbody id="history-rows">${historyRows.length ? historyRows : '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>'}</tbody></table></div>
 
+        ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
         <script>
-            setInterval(async () => {
-                const urlParams = new URLSearchParams(window.location.search);
-                const username = urlParams.get('user');
-                if (!username) return;
+            const CURR_USER = ${JSON.stringify(username)};
+            const CURR_TOKEN = ${JSON.stringify(token)};
 
+            window.syncNow = async function() {
+                if (document.hidden) return;
                 try {
-                    const res = await fetch(\`/api/data?user=\${encodeURIComponent(username)}\`);
+                    const res = await fetch(\`/api/data?user=\${encodeURIComponent(CURR_USER)}&token=\${encodeURIComponent(CURR_TOKEN)}\`);
+                    if (res.status === 401) {
+                        window.location.replace('/login?err=' + encodeURIComponent('Phiên đăng nhập đã hết hạn!'));
+                        return;
+                    }
                     const data = await res.json();
-                    if (data.error) return;
+                    if (!data || data.error) return;
 
                     document.getElementById('total-score').innerText = data.cumulativeScore + ' điểm';
 
                     const tbody = document.getElementById('history-rows');
-                    if (data.history.length === 0) {
+                    if (!data.history || data.history.length === 0) {
                         tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>';
                     } else {
                         tbody.innerHTML = data.history.map((item, index) => \`
@@ -684,8 +901,8 @@ app.get('/', async (req, res) => {
                                 <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">\${item.date}</td>
                                 <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;font-weight:bold;color:#27ae60;">+\${item.score} đ</td>
                                 <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">
-                                    <a href="/edit?user=\${encodeURIComponent(username)}&index=\${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
-                                    <a href="/delete?user=\${encodeURIComponent(username)}&index=\${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
+                                    <a href="/edit?user=\${encodeURIComponent(CURR_USER)}&token=\${encodeURIComponent(CURR_TOKEN)}&index=\${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
+                                    <a href="/delete?user=\${encodeURIComponent(CURR_USER)}&token=\${encodeURIComponent(CURR_TOKEN)}&index=\${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
                                 </td>
                             </tr>
                         \`).join('');
@@ -693,15 +910,20 @@ app.get('/', async (req, res) => {
                 } catch (e) {
                     console.error('Lỗi đồng bộ dữ liệu:', e);
                 }
-            }, 3000);
+            };
+
+            setInterval(window.syncNow, 2000);
         </script>
         </body></html>
     `);
 });
 
 app.post('/submit-report', async (req, res) => {
-    const username = req.query.user;
-    if (!username) return res.redirect('/login');
+    const auth = await authorizeRequest(req, false);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn!');
+
+    const username = auth.username;
+    const token = auth.token;
     const rawDate = req.body.reportDate;
     let dateStr = rawDate ? rawDate.split('-').reverse().join('/') : new Date().toLocaleDateString('vi-VN');
     const result = await calculateScoreAndContent(username, dateStr, req.body);
@@ -714,14 +936,19 @@ app.post('/submit-report', async (req, res) => {
         <title>🌐 Chiến Dịch 60 Ngày - Thành Công</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
-        <body><div class="card"><h1>✅ Gửi Báo Cáo Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
+        <body><div class="card"><h1>✅ Gửi Báo Cáo Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}">Quay Lại Trang Chủ</a></div>
+        ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
+        </body></html>
     `);
 });
 
 app.get('/delete', async (req, res) => {
-    const username = req.query.user;
+    const auth = await authorizeRequest(req, false);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn!');
+
+    const username = auth.username;
+    const token = auth.token;
     const index = parseInt(req.query.index);
-    if (!username) return res.redirect('/login');
     let user = await User.findOne({ username });
     if (user && !isNaN(index) && index >= 0 && index < user.history.length) {
         const deletedDay = user.history.splice(index, 1)[0];
@@ -729,15 +956,20 @@ app.get('/delete', async (req, res) => {
         const cumulativeScore = user.history.reduce((sum, item) => sum + (item.score || 0), 0);
         await sendToSignal(`🗑️ **[${username}] XÓA BÁO CÁO**\nĐã xóa ngày: ${deletedDay.date}\n🏆 Tổng điểm: **${cumulativeScore} điểm**`);
     }
-    res.redirect(`/?user=${encodeURIComponent(username)}`);
+    res.redirect(`/?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}`);
 });
 
 app.get('/edit', async (req, res) => {
-    const username = req.query.user;
+    const auth = await authorizeRequest(req, false);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn!');
+
+    const username = auth.username;
+    const token = auth.token;
     const index = parseInt(req.query.index);
-    if (!username) return res.redirect('/login');
     let user = await User.findOne({ username });
-    if (!user || isNaN(index) || index < 0 || index >= user.history.length) return res.redirect(`/?user=${encodeURIComponent(username)}`);
+    if (!user || isNaN(index) || index < 0 || index >= user.history.length) {
+        return res.redirect(`/?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}`);
+    }
 
     const item = user.history[index];
     const d = item.details || {};
@@ -760,8 +992,7 @@ app.get('/edit', async (req, res) => {
         <body>
             <div class="container">
                 <h3>✏️ Sửa Báo Cáo Ngày: ${item.date}</h3>
-                <form action="/update-edit" method="POST">
-                    <input type="hidden" name="user" value="${username}">
+                <form action="/update-edit?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}" method="POST">
                     <input type="hidden" name="index" value="${index}">
                     <input type="hidden" name="date" value="${item.date}">
 
@@ -783,15 +1014,20 @@ app.get('/edit', async (req, res) => {
 
                     <button type="submit">💾 Lưu Thay Đổi</button>
                 </form>
-                <a href="/?user=${encodeURIComponent(username)}" class="back-link">⬅️ Quay lại trang chủ</a>
+                <a href="/?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}" class="back-link">⬅️ Quay lại trang chủ</a>
             </div>
+            ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
         </body></html>
     `);
 });
 
 app.post('/update-edit', async (req, res) => {
-    const { user: username, date: dateStr } = req.body;
-    if (!username) return res.redirect('/login');
+    const auth = await authorizeRequest(req, false);
+    if (!auth) return res.redirect('/login?err=Phiên+đăng+nhập+hết+hạn!');
+
+    const username = auth.username;
+    const token = auth.token;
+    const dateStr = req.body.date;
     const result = await calculateScoreAndContent(username, dateStr, req.body);
     if (result) {
         await sendToSignal(`✏️ **[${username}] CẬP NHẬT NGÀY ${dateStr}**\n\n` + result.reportContent);
@@ -802,7 +1038,9 @@ app.post('/update-edit', async (req, res) => {
         <title>🌐 Chiến Dịch 60 Ngày - Đã Sửa</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
-        <body><div class="card"><h1>✅ Đã Sửa Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
+        <body><div class="card"><h1>✅ Đã Sửa Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}">Quay Lại Trang Chủ</a></div>
+        ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
+        </body></html>
     `);
 });
 
@@ -908,7 +1146,6 @@ bot.action('tele_logout', (ctx) => {
     ctx.reply('Đã đăng xuất! Gõ /start để khởi động lại.');
 });
 
-// --- CÁC HÀNH ĐỘNG ADMIN TRÊN TELEGRAM ---
 async function ensureTeleAdmin(ctx) {
     const session = teleSessions[ctx.chat.id];
     if (!session || !session.loggedIn) {
