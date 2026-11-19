@@ -806,7 +806,7 @@ app.post('/update-edit', async (req, res) => {
     `);
 });
 
-// --- PHẦN BOT TELEGRAM ---
+// --- PHẦN BOT TELEGRAM (CÓ TÍCH HỢP QUYỀN ADMIN) ---
 const teleSessions = {};
 
 const steps = [
@@ -822,6 +822,26 @@ const steps = [
     { key: 'ketTrai', label: '🔰 Kết trái (Nhập số)' }
 ];
 
+async function completeLoginSession(ctx, username) {
+    const session = teleSessions[ctx.chat.id];
+    const dbUser = await User.findOne({ username });
+    if (!dbUser) {
+        delete teleSessions[ctx.chat.id];
+        return ctx.reply('❌ Không tìm thấy tài khoản! Gõ /start để thử lại.');
+    }
+    session.loggedIn = true;
+    session.username = dbUser.username;
+    session.role = dbUser.role || 'user';
+    delete session.step;
+    delete session.tempUser;
+    delete session.adminTargetUser;
+    delete session.adminEditIndex;
+    delete session.adminReportDate;
+    delete session.adminReportStep;
+    delete session.adminReportData;
+    return showTeleMenu(ctx);
+}
+
 bot.start((ctx) => {
     teleSessions[ctx.chat.id] = { loggedIn: false };
     ctx.reply(
@@ -835,35 +855,50 @@ bot.start((ctx) => {
 });
 
 bot.action('tele_quick_login', (ctx) => {
-    teleSessions[ctx.chat.id].step = 'WAITING_QUICK_USER';
+    teleSessions[ctx.chat.id] = { loggedIn: false, step: 'WAITING_QUICK_USER' };
     ctx.reply('👉 Nhập **Tên đăng nhập (Username)** của bạn:');
 });
 
 bot.action('tele_manual_login', (ctx) => {
-    teleSessions[ctx.chat.id].step = 'WAITING_LOGIN_USER';
+    teleSessions[ctx.chat.id] = { loggedIn: false, step: 'WAITING_LOGIN_USER' };
     ctx.reply('👉 Nhập **Tên đăng nhập**:');
 });
 
 bot.action('tele_register', (ctx) => {
-    teleSessions[ctx.chat.id].step = 'WAITING_REG_USER';
+    teleSessions[ctx.chat.id] = { loggedIn: false, step: 'WAITING_REG_USER' };
     ctx.reply('👉 Nhập **Tên đăng nhập mới**:');
 });
 
 async function showTeleMenu(ctx) {
     const session = teleSessions[ctx.chat.id];
+    if (!session || !session.loggedIn) return ctx.reply('Vui lòng gõ /start để đăng nhập.');
+
     const user = await User.findOne({ username: session.username });
-    const history = user ? user.history : [];
+    if (!user) {
+        delete teleSessions[ctx.chat.id];
+        return ctx.reply('❌ Tài khoản không còn tồn tại. Gõ /start để đăng nhập lại.');
+    }
+
+    session.role = user.role || 'user';
+    const history = user.history || [];
     const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
 
+    const keyboardRows = [
+        [Markup.button.callback('➕ Thêm báo cáo (Chọn ngày tùy ý)', 'tele_choose_date')],
+        [Markup.button.callback('📋 Xem lịch sử & Sửa/Xóa', 'tele_list_report')]
+    ];
+
+    if (session.role === 'admin') {
+        keyboardRows.push([Markup.button.callback('🛡️ Quản trị Admin (Tài khoản & Báo cáo)', 'tele_admin_panel')]);
+    }
+
+    keyboardRows.push([Markup.button.callback('🚪 Đăng xuất', 'tele_logout')]);
+
     ctx.reply(
-        `👤 Tài khoản: <b>${session.username}</b>\n🏆 Tổng điểm tích lũy: <b>${cumulativeScore} điểm</b>\n\nChọn chức năng:`,
+        `👤 Tài khoản: <b>${session.username}</b> ${session.role === 'admin' ? '(<b>ADMIN</b>)' : ''}\n🏆 Tổng điểm tích lũy: <b>${cumulativeScore} điểm</b>\n\nChọn chức năng:`,
         {
             parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([
-                [Markup.button.callback('➕ Thêm báo cáo (Chọn ngày tùy ý)', 'tele_choose_date')],
-                [Markup.button.callback('📋 Xem lịch sử & Sửa/Xóa', 'tele_list_report')],
-                [Markup.button.callback('🚪 Đăng xuất', 'tele_logout')]
-            ])
+            ...Markup.inlineKeyboard(keyboardRows)
         }
     );
 }
@@ -871,6 +906,248 @@ async function showTeleMenu(ctx) {
 bot.action('tele_logout', (ctx) => {
     delete teleSessions[ctx.chat.id];
     ctx.reply('Đã đăng xuất! Gõ /start để khởi động lại.');
+});
+
+// --- CÁC HÀNH ĐỘNG ADMIN TRÊN TELEGRAM ---
+async function ensureTeleAdmin(ctx) {
+    const session = teleSessions[ctx.chat.id];
+    if (!session || !session.loggedIn) {
+        await ctx.reply('Vui lòng đăng nhập bằng lệnh /start.');
+        return null;
+    }
+    const adminDoc = await verifyAdmin(session.username);
+    if (!adminDoc) {
+        await ctx.reply('❌ Tài khoản hiện tại không có quyền Admin.');
+        return null;
+    }
+    return adminDoc;
+}
+
+bot.action('tele_admin_panel', async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const allUsers = await User.find({}).sort({ username: 1 });
+    const totalReports = allUsers.reduce((acc, u) => acc + ((u.history && u.history.length) || 0), 0);
+    const totalScore = allUsers.reduce(
+        (acc, u) => acc + ((u.history || []).reduce((s, item) => s + (item.score || 0), 0)),
+        0
+    );
+
+    ctx.reply(
+        `🛡️ <b>BẢNG ĐIỀU KHIỂN ADMIN (TELEGRAM)</b>\n👥 Tổng tài khoản: <b>${allUsers.length}</b> | 📋 Tổng báo cáo: <b>${totalReports}</b>\n🏆 Tổng điểm hệ thống: <b>${totalScore} điểm</b>`,
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('👥 Quản lý tài khoản (Đổi MK / Xóa)', 'tele_admin_users')],
+                [Markup.button.callback('📝 Quản lý báo cáo của tài khoản', 'tele_admin_reports_users')],
+                [Markup.button.callback('⬅️ Về Menu chính', 'tele_menu')]
+            ])
+        }
+    );
+});
+
+bot.action('tele_admin_users', async (ctx) => {
+    const adminDoc = await ensureTeleAdmin(ctx);
+    if (!adminDoc) return;
+
+    const allUsers = await User.find({}).sort({ username: 1 });
+    if (!allUsers.length) {
+        return ctx.reply('Chưa có tài khoản nào.', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Về Admin', 'tele_admin_panel')]]));
+    }
+
+    for (const u of allUsers) {
+        const score = (u.history || []).reduce((s, item) => s + (item.score || 0), 0);
+        const btns = [Markup.button.callback('🔑 Đổi mật khẩu', `adm_pw_${u.username}`)];
+        if (u.username !== adminDoc.username) {
+            btns.push(Markup.button.callback('🗑️ Xóa tài khoản', `adm_delu_ask_${u.username}`));
+        }
+        await ctx.reply(
+            `👤 <b>${u.username}</b> ${u.role === 'admin' ? '[ADMIN]' : '[User]'} — 🏆 <b>${score} đ</b> (${(u.history || []).length} ngày)`,
+            {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([btns])
+            }
+        );
+    }
+
+    ctx.reply('Hoàn tất danh sách tài khoản:', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Về Admin', 'tele_admin_panel')]]));
+});
+
+bot.action(/^adm_pw_(.+)$/, async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const targetUser = ctx.match[1];
+    const session = teleSessions[ctx.chat.id];
+    session.step = 'ADMIN_WAITING_NEW_PASS';
+    session.adminTargetUser = targetUser;
+    ctx.reply(`🔑 Nhập <b>mật khẩu mới</b> cho tài khoản <b>${targetUser}</b>:`, { parse_mode: 'HTML' });
+});
+
+bot.action(/^adm_delu_ask_(.+)$/, async (ctx) => {
+    const adminDoc = await ensureTeleAdmin(ctx);
+    if (!adminDoc) return;
+    const targetUser = ctx.match[1];
+    if (targetUser === adminDoc.username) {
+        return ctx.reply('❌ Không thể xóa tài khoản Admin đang đăng nhập.');
+    }
+    ctx.reply(
+        `⚠️ Xác nhận <b>XÓA VĨNH VIỄN</b> tài khoản <b>${targetUser}</b> và toàn bộ lịch sử báo cáo?`,
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [
+                    Markup.button.callback('✅ Xác nhận xóa', `adm_delu_ok_${targetUser}`),
+                    Markup.button.callback('❌ Hủy', 'tele_admin_users')
+                ]
+            ])
+        }
+    );
+});
+
+bot.action(/^adm_delu_ok_(.+)$/, async (ctx) => {
+    const adminDoc = await ensureTeleAdmin(ctx);
+    if (!adminDoc) return;
+    const targetUser = ctx.match[1];
+    if (targetUser === adminDoc.username) {
+        return ctx.reply('❌ Không thể xóa tài khoản Admin đang đăng nhập.');
+    }
+
+    const deleted = await User.findOneAndDelete({ username: targetUser });
+    if (deleted) {
+        await sendToSignal(`🛡️ **[ADMIN: ${adminDoc.username}] ĐÃ XÓA TÀI KHOẢN [${targetUser}]**`);
+        await ctx.reply(`✅ Đã xóa tài khoản <b>${targetUser}</b>!`, { parse_mode: 'HTML' });
+    } else {
+        await ctx.reply('❌ Không tìm thấy tài khoản để xóa.');
+    }
+    ctx.reply('Quay lại:', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Về Admin', 'tele_admin_panel')]]));
+});
+
+bot.action('tele_admin_reports_users', async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const allUsers = await User.find({}).sort({ username: 1 });
+    if (!allUsers.length) {
+        return ctx.reply('Chưa có tài khoản nào.', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Về Admin', 'tele_admin_panel')]]));
+    }
+
+    const rows = allUsers.map(u => [
+        Markup.button.callback(`📂 ${u.username} (${(u.history || []).length} ngày)`, `adm_u_menu_${u.username}`)
+    ]);
+    rows.push([Markup.button.callback('⬅️ Về Admin', 'tele_admin_panel')]);
+
+    ctx.reply('📝 Chọn tài khoản để quản lý báo cáo:', Markup.inlineKeyboard(rows));
+});
+
+bot.action(/^adm_u_menu_(.+)$/, async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const targetUser = ctx.match[1];
+    const userDoc = await User.findOne({ username: targetUser });
+    if (!userDoc) return ctx.reply('❌ Không tìm thấy tài khoản.');
+
+    const score = (userDoc.history || []).reduce((s, item) => s + (item.score || 0), 0);
+    ctx.reply(
+        `📂 Quản lý báo cáo của <b>${targetUser}</b> (🏆 <b>${score} điểm</b>):`,
+        {
+            parse_mode: 'HTML',
+            ...Markup.inlineKeyboard([
+                [Markup.button.callback('➕ Thêm báo cáo (Hôm nay)', `adm_add_today_${targetUser}`)],
+                [Markup.button.callback('📅 Thêm báo cáo (Chọn ngày)', `adm_add_date_${targetUser}`)],
+                [Markup.button.callback('📋 Danh sách ngày (Sửa / Xóa)', `adm_list_${targetUser}`)],
+                [Markup.button.callback('⬅️ Chọn tài khoản khác', 'tele_admin_reports_users')]
+            ])
+        }
+    );
+});
+
+bot.action(/^adm_add_today_(.+)$/, async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const targetUser = ctx.match[1];
+    const session = teleSessions[ctx.chat.id];
+    const today = new Date();
+    session.adminTargetUser = targetUser;
+    session.adminReportDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+    session.adminReportStep = 0;
+    session.adminReportData = {};
+    delete session.step;
+    ctx.reply(`📝 [Admin] Nhập báo cáo cho <b>${targetUser}</b> — Ngày <b>${session.adminReportDate}</b>.\n\n👉 <b>${steps[0].label}:</b>`, { parse_mode: 'HTML' });
+});
+
+bot.action(/^adm_add_date_(.+)$/, async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const targetUser = ctx.match[1];
+    const session = teleSessions[ctx.chat.id];
+    session.adminTargetUser = targetUser;
+    session.step = 'ADMIN_WAITING_CUSTOM_DATE';
+    ctx.reply(`📅 [Admin] Nhập ngày theo định dạng <b>DD/MM/YYYY</b> cho <b>${targetUser}</b> (VD: <code>20/11/2026</code>):`, { parse_mode: 'HTML' });
+});
+
+bot.action(/^adm_list_(.+)$/, async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const targetUser = ctx.match[1];
+    const userDoc = await User.findOne({ username: targetUser });
+    if (!userDoc) return ctx.reply('❌ Không tìm thấy tài khoản.');
+
+    const history = userDoc.history || [];
+    if (!history.length) {
+        return ctx.reply(
+            `Tài khoản <b>${targetUser}</b> chưa có báo cáo nào.`,
+            {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Quay lại', `adm_u_menu_${targetUser}`)]])
+            }
+        );
+    }
+
+    for (let i = 0; i < history.length; i++) {
+        const item = history[i];
+        await ctx.reply(
+            `👤 <b>${targetUser}</b> | 📅 <b>${item.date}</b> | 🏆 <b>+${item.score} đ</b>`,
+            {
+                parse_mode: 'HTML',
+                ...Markup.inlineKeyboard([
+                    [
+                        Markup.button.callback('✏️ Sửa', `adm_rep_edit_${i}_${targetUser}`),
+                        Markup.button.callback('❌ Xóa', `adm_rep_del_${i}_${targetUser}`)
+                    ]
+                ])
+            }
+        );
+    }
+
+    ctx.reply('Hoàn tất:', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Quay lại', `adm_u_menu_${targetUser}`)]]));
+});
+
+bot.action(/^adm_rep_del_(\d+)_(.+)$/, async (ctx) => {
+    const adminDoc = await ensureTeleAdmin(ctx);
+    if (!adminDoc) return;
+    const index = parseInt(ctx.match[1]);
+    const targetUser = ctx.match[2];
+
+    const userDoc = await User.findOne({ username: targetUser });
+    if (userDoc && !isNaN(index) && index >= 0 && index < userDoc.history.length) {
+        const deleted = userDoc.history.splice(index, 1)[0];
+        await userDoc.save();
+        const cumulativeScore = userDoc.history.reduce((sum, item) => sum + (item.score || 0), 0);
+        await sendToSignal(`🛡️ **[ADMIN: ${adminDoc.username}] XÓA BÁO CÁO CỦA [${targetUser}]**\nĐã xóa ngày: ${deleted.date}\n🏆 Tổng điểm [${targetUser}]: **${cumulativeScore} điểm**`);
+        return ctx.reply(`✅ Đã xóa báo cáo ngày <b>${deleted.date}</b> của <b>${targetUser}</b>!`, { parse_mode: 'HTML' });
+    }
+    ctx.reply('❌ Không tìm thấy báo cáo để xóa.');
+});
+
+bot.action(/^adm_rep_edit_(\d+)_(.+)$/, async (ctx) => {
+    if (!(await ensureTeleAdmin(ctx))) return;
+    const index = parseInt(ctx.match[1]);
+    const targetUser = ctx.match[2];
+    const userDoc = await User.findOne({ username: targetUser });
+    if (!userDoc || isNaN(index) || index < 0 || index >= userDoc.history.length) {
+        return ctx.reply('❌ Không tìm thấy báo cáo để sửa.');
+    }
+
+    const item = userDoc.history[index];
+    const session = teleSessions[ctx.chat.id];
+    session.adminTargetUser = targetUser;
+    session.adminReportDate = item.date;
+    session.adminReportStep = 0;
+    session.adminReportData = {};
+    delete session.step;
+    ctx.reply(`✏️ [Admin] Đang sửa báo cáo của <b>${targetUser}</b> — Ngày <b>${item.date}</b>.\n\n👉 <b>${steps[0].label}:</b>`, { parse_mode: 'HTML' });
 });
 
 bot.action('tele_choose_date', (ctx) => {
@@ -979,11 +1256,8 @@ bot.on('text', async (ctx) => {
     if (session.step === 'WAITING_QUICK_USER') {
         const user = await User.findOne({ username: text });
         if (user) {
-            session.loggedIn = true;
-            session.username = text;
-            delete session.step;
-            ctx.reply('✅ Đăng nhập nhanh thành công!');
-            return showTeleMenu(ctx);
+            await ctx.reply('✅ Đăng nhập nhanh thành công!');
+            return completeLoginSession(ctx, text);
         } else {
             delete teleSessions[ctx.chat.id];
             return ctx.reply('❌ Không tìm thấy tài khoản! Gõ /start để thử lại.');
@@ -999,11 +1273,8 @@ bot.on('text', async (ctx) => {
     if (session.step === 'WAITING_LOGIN_PASS') {
         const user = await User.findOne({ username: session.tempUser, password: text });
         if (user) {
-            session.loggedIn = true;
-            session.username = session.tempUser;
-            delete session.step;
-            ctx.reply('✅ Đăng nhập thành công!');
-            return showTeleMenu(ctx);
+            await ctx.reply('✅ Đăng nhập thành công!');
+            return completeLoginSession(ctx, session.tempUser);
         } else {
             delete teleSessions[ctx.chat.id];
             return ctx.reply('❌ Sai mật khẩu! Gõ /start để thử lại.');
@@ -1031,6 +1302,70 @@ bot.on('text', async (ctx) => {
         await User.create({ username: session.tempRegUser, password: session.tempRegPass, secret: text, role: 'user', history: [] });
         delete teleSessions[ctx.chat.id];
         return ctx.reply('🎉 Đăng ký thành công! Gõ /start để đăng nhập.');
+    }
+
+    if (session.step === 'ADMIN_WAITING_NEW_PASS') {
+        const adminDoc = await ensureTeleAdmin(ctx);
+        if (!adminDoc) return;
+        const targetUser = session.adminTargetUser;
+        delete session.step;
+        delete session.adminTargetUser;
+
+        if (!text) return ctx.reply('❌ Mật khẩu mới không được rỗng.');
+        const targetDoc = await User.findOne({ username: targetUser });
+        if (!targetDoc) return ctx.reply('❌ Không tìm thấy tài khoản.');
+
+        targetDoc.password = text;
+        await targetDoc.save();
+        await sendToSignal(`🛡️ **[ADMIN: ${adminDoc.username}] ĐÃ ĐỔI MẬT KHẨU CHO TÀI KHOẢN [${targetUser}]**`);
+        await ctx.reply(`✅ Đã đổi mật khẩu cho tài khoản <b>${targetUser}</b>!`, { parse_mode: 'HTML' });
+        return ctx.reply('Quay lại:', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Về Admin', 'tele_admin_panel')]]));
+    }
+
+    if (session.step === 'ADMIN_WAITING_CUSTOM_DATE') {
+        if (!(await ensureTeleAdmin(ctx))) return;
+        session.adminReportDate = text;
+        session.adminReportStep = 0;
+        session.adminReportData = {};
+        delete session.step;
+        return ctx.reply(
+            `📝 [Admin] Nhập báo cáo cho <b>${session.adminTargetUser}</b> — Ngày <b>${session.adminReportDate}</b>.\n\n👉 <b>${steps[0].label}:</b>`,
+            { parse_mode: 'HTML' }
+        );
+    }
+
+    if (session.loggedIn && session.adminReportStep !== undefined) {
+        const adminDoc = await ensureTeleAdmin(ctx);
+        if (!adminDoc) return;
+
+        const currentStepConfig = steps[session.adminReportStep];
+        session.adminReportData[currentStepConfig.key] = text;
+        session.adminReportStep++;
+
+        if (session.adminReportStep < steps.length) {
+            const nextStepConfig = steps[session.adminReportStep];
+            return ctx.reply(`👉 <b>${nextStepConfig.label}:</b>`, { parse_mode: 'HTML' });
+        } else {
+            const targetUser = session.adminTargetUser;
+            const dateStr = session.adminReportDate;
+            const result = await calculateScoreAndContent(targetUser, dateStr, session.adminReportData);
+
+            if (result) {
+                await ctx.reply(`📋 <b>[ADMIN] ĐÃ LƯU CHO ${targetUser} (${dateStr}):</b>\n\n${result.reportContent}\n\n${result.summaryContent}`, { parse_mode: 'HTML' });
+                try {
+                    await sendToSignal(`🛡️ **[ADMIN: ${adminDoc.username}] CẬP NHẬT BÁO CÁO CHO [${targetUser}] - ${dateStr} (TELE)**\n\n` + result.reportContent);
+                    setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
+                } catch (e) {
+                    console.error('Lỗi Signal:', e.message);
+                }
+            }
+
+            delete session.adminTargetUser;
+            delete session.adminReportDate;
+            delete session.adminReportStep;
+            delete session.adminReportData;
+            return ctx.reply('Quay lại:', Markup.inlineKeyboard([[Markup.button.callback('⬅️ Về Admin', 'tele_admin_panel')]]));
+        }
     }
 
     if (session.step === 'WAITING_CUSTOM_DATE') {
