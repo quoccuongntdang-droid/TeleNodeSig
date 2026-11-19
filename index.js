@@ -11,6 +11,7 @@ app.use(express.json());
 
 const PHONE = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
 const APIKEY = '911098';
+const FAVICON_URL = 'https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg';
 
 // --- KẾT NỐI MONGODB ATLAS ---
 const MONGO_URI = process.env.MONGO_URI;
@@ -23,6 +24,7 @@ const userSchema = new mongoose.Schema({
     username: { type: String, unique: true, required: true },
     password: { type: String, required: true },
     secret: { type: String, required: true },
+    role: { type: String, default: 'user' }, // 'user' hoặc 'admin'
     history: [{
         date: String,
         score: Number,
@@ -39,6 +41,13 @@ async function sendToSignal(message) {
     } catch (e) {
         console.error('Lỗi gửi Signal:', e.message);
     }
+}
+
+// --- HÀM KIỂM TRA QUYỀN ADMIN ---
+async function verifyAdmin(username) {
+    if (!username) return null;
+    const adminUser = await User.findOne({ username, role: 'admin' });
+    return adminUser;
 }
 
 // --- TÍNH TOÁN VÀ LƯU DATABASE ---
@@ -75,7 +84,6 @@ async function calculateScoreAndContent(username, dateStr, d) {
         user.history.push(dayData);
     }
 
-    // Sắp xếp lịch sử theo ngày tháng
     user.history.sort((a, b) => {
         const [dA, mA, yA] = a.date.split('/');
         const [dB, mB, yB] = b.date.split('/');
@@ -103,7 +111,7 @@ app.get('/api/data', async (req, res) => {
     if (!username) return res.json({ error: 'Unauthorized' });
     const user = await User.findOne({ username });
     if (!user) return res.json({ error: 'User not found' });
-    
+
     const history = user.history || [];
     const cumulativeScore = history.reduce((sum, item) => sum + (item.score || 0), 0);
     res.json({ cumulativeScore, history });
@@ -114,7 +122,7 @@ app.get('/login', (req, res) => {
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Đăng Nhập</title>
-        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>🔐 Đăng Nhập</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-login" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><button type="submit">Đăng Nhập</button></form>
@@ -125,15 +133,16 @@ app.get('/login', (req, res) => {
 app.post('/auth-login', async (req, res) => {
     const { username, password } = req.body;
     const user = await User.findOne({ username, password });
-    if (user) res.redirect(`/?user=${encodeURIComponent(username)}`);
-    else res.redirect('/login?err=Sai+tên+đăng+nhập+hoặc+mật+khẩu!');
+    if (!user) return res.redirect('/login?err=Sai+tên+đăng+nhập+hoặc+mật+khẩu!');
+    if (user.role === 'admin') return res.redirect(`/admin?admin=${encodeURIComponent(username)}`);
+    return res.redirect(`/?user=${encodeURIComponent(username)}`);
 });
 
 app.get('/register', (req, res) => {
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Đăng Ký</title>
-        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>📝 Đăng Ký</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-register" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><input type="text" name="secret" placeholder="Từ khóa bí mật" required><button type="submit">Đăng Ký</button></form>
@@ -146,7 +155,7 @@ app.post('/auth-register', async (req, res) => {
     try {
         const existing = await User.findOne({ username });
         if (existing) return res.redirect('/register?err=Tên+đăng+nhập+đã+tồn+tại!');
-        await User.create({ username, password, secret, history: [] });
+        await User.create({ username, password, secret, role: 'user', history: [] });
         res.redirect(`/login?err=Đăng+ký+thành+công!+Hãy+đăng+nhập.`);
     } catch (e) {
         res.redirect('/register?err=Lỗi+đăng+ký+tài+khoản!');
@@ -157,7 +166,7 @@ app.get('/forgot', (req, res) => {
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Khôi Phục</title>
-        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#e67e22;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>🔑 Khôi Phục</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-forgot" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="text" name="secret" placeholder="Từ khóa bí mật" required><input type="password" name="newPassword" placeholder="Mật khẩu mới" required><button type="submit">Đổi Mật Khẩu</button></form>
@@ -177,6 +186,342 @@ app.post('/auth-forgot', async (req, res) => {
     }
 });
 
+// --- TRANG ADMIN QUẢN TRỊ TẤT CẢ TÀI KHOẢN & BÁO CÁO (KÈM BỘ TÌM KIẾM & LỌC) ---
+app.get('/admin', async (req, res) => {
+    const adminName = req.query.admin;
+    const adminUser = await verifyAdmin(adminName);
+    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+
+    const allUsers = await User.find({}).sort({ username: 1 });
+    const now = new Date();
+    const defaultDateStr = now.toISOString().split('T')[0];
+
+    const userOptions = allUsers
+        .map(u => `<option value="${u.username}">${u.username} (${u.role === 'admin' ? 'Admin' : 'Thành viên'})</option>`)
+        .join('');
+
+    let totalSystemScore = 0;
+    let totalReportsCount = 0;
+
+    const userSectionsHtml = allUsers.map(u => {
+        const uHistory = u.history || [];
+        const uScore = uHistory.reduce((sum, item) => sum + (item.score || 0), 0);
+        totalSystemScore += uScore;
+        totalReportsCount += uHistory.length;
+
+        const rowsHtml = uHistory.length
+            ? uHistory.map((item, idx) => `
+                <tr class="report-row" data-date="${item.date}">
+                    <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.date}</td>
+                    <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#27ae60;">+${item.score} đ</td>
+                    <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
+                        <a href="/admin-edit?admin=${encodeURIComponent(adminName)}&target=${encodeURIComponent(u.username)}&index=${idx}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
+                        <a href="/admin-delete?admin=${encodeURIComponent(adminName)}&target=${encodeURIComponent(u.username)}&index=${idx}" onclick="return confirm('Xóa báo cáo ngày ${item.date} của ${u.username}?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
+                    </td>
+                </tr>
+            `).join('')
+            : `<tr class="empty-row"><td colspan="3" style="text-align:center;padding:10px;color:#777;">Chưa có báo cáo</td></tr>`;
+
+        return `
+            <div class="user-block" data-username="${u.username.toLowerCase()}" style="border:1px solid #dce4ec;border-radius:10px;padding:12px;margin-top:15px;background:#fafbfd;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span>👤 <b class="uname-text">${u.username}</b> ${u.role === 'admin' ? '<span style="background:#8e44ad;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">ADMIN</span>' : ''}</span>
+                    <span style="font-weight:bold;color:#2980b9;">${uScore} điểm (${uHistory.length} ngày)</span>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:13px;background:white;">
+                    <thead><tr style="background:#ecf0f1;"><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+        `;
+    }).join('');
+
+    res.send(`
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Bảng Điều Khiển Admin</title>
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
+        <style>
+            body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:15px}
+            .container{max-width:720px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}
+            h2,h3{text-align:center;color:#2c3e50}
+            .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}
+            .stats-box{background:#eaf2f8;border:1px solid #aed6f1;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}
+            .section-title{background:#2c3e50;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}
+            .form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+            label{font-size:14px;color:#333;flex:2}
+            input[type="number"],input[type="date"],select{padding:6px;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1;text-align:center}
+            button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:15px;cursor:pointer}
+            
+            /* Khu vực Tìm kiếm & Lọc */
+            .filter-card{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:15px;}
+            .filter-grid{display:flex;gap:10px;flex-wrap:wrap;}
+            .filter-item{flex:1;min-width:180px;}
+            .filter-item label{display:block;font-size:13px;font-weight:bold;margin-bottom:5px;color:#4a5568;}
+            .filter-input{width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;box-sizing:border-box;}
+            .btn-reset{background:#718096;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:bold;margin-top:8px;}
+        </style></head>
+        <body>
+            <div class="container">
+                <div class="top-bar">
+                    <span>🛡️ Admin: <b>${adminName}</b></span>
+                    <div>
+                        <a href="/?user=${encodeURIComponent(adminName)}" style="color:#2980b9;text-decoration:none;font-weight:bold;margin-right:12px;">Trang Cá Nhân</a>
+                        <a href="/login" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a>
+                    </div>
+                </div>
+                <h2>🛠️ Quản Trị Toàn Hệ Thống</h2>
+                <div class="stats-box">
+                    👥 Tài khoản: <b>${allUsers.length}</b> | 📋 Tổng báo cáo: <b>${totalReportsCount}</b><br>
+                    🏆 Tổng điểm toàn hệ thống: <b style="color:#27ae60;font-size:18px;">${totalSystemScore} điểm</b>
+                </div>
+
+                <!-- FORM TÌM KIẾM & LỌC DỮ LIỆU -->
+                <div class="filter-card">
+                    <div style="font-size:14px;font-weight:bold;color:#2d3748;margin-bottom:8px;">🔍 BỘ LỌC VÀ TÌM KIẾM BÁO CÁO</div>
+                    <div class="filter-grid">
+                        <div class="filter-item">
+                            <label>🔎 Tìm tên tài khoản:</label>
+                            <input type="text" id="searchUser" class="filter-input" placeholder="Nhập username...">
+                        </div>
+                        <div class="filter-item">
+                            <label>📅 Lọc theo ngày báo cáo:</label>
+                            <input type="date" id="filterDate" class="filter-input">
+                        </div>
+                    </div>
+                    <button type="button" class="btn-reset" onclick="resetFilters()">🔄 Xóa bộ lọc</button>
+                    <span id="filterStats" style="font-size:13px;color:#4a5568;margin-left:10px;font-style:italic;"></span>
+                </div>
+
+                <form action="/admin-add?admin=${encodeURIComponent(adminName)}" method="POST">
+                    <div class="section-title">➕ ADMIN THÊM BÁO CÁO CHO TÀI KHOẢN</div>
+                    <div class="form-group" style="margin-top:10px;"><label>Chọn tài khoản:</label><select name="targetUser" required>${userOptions}</select></div>
+                    <div class="form-group"><label>Ngày báo cáo:</label><input type="date" name="reportDate" value="${defaultDateStr}" required></div>
+
+                    <div class="section-title">🌟 MY PAGE (0 hoặc 1)</div>
+                    <div class="form-group"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="1" min="0" max="1" required></div>
+                    <div class="form-group"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="1" min="0" max="1" required></div>
+                    <div class="form-group"><label>Sách LT:</label><input type="number" name="sachLT" value="1" min="0" max="1" required></div>
+                    <div class="form-group"><label>Tập Gđ:</label><input type="number" name="tapGd" value="1" min="0" max="1" required></div>
+
+                    <div class="section-title">🎊 PHÁT BIỂU & EDU</div>
+                    <div class="form-group"><label>Bài mới:</label><input type="number" name="baiMoi" value="0" min="0" required></div>
+                    <div class="form-group"><label>Bài cũ:</label><input type="number" name="baiCu" value="0" min="0" required></div>
+                    <div class="form-group"><label>EDU:</label><input type="number" name="edu" value="0" min="0" required></div>
+
+                    <div class="section-title">🔥 TRUDA</div>
+                    <div class="form-group"><label>Đơn Thuần:</label><input type="number" name="donThuan" value="0" min="0" required></div>
+                    <div class="form-group"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="0" min="0" required></div>
+                    <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="0" min="0" required></div>
+
+                    <button type="submit">💾 Lưu Báo Cáo Cho Tài Khoản</button>
+                </form>
+
+                <div class="section-title" style="margin-top:30px;">📊 Toàn Bộ Báo Cáo Các Tài Khoản</div>
+                <div id="usersListContainer">
+                    ${userSectionsHtml}
+                </div>
+            </div>
+
+            <script>
+                const searchUserInput = document.getElementById('searchUser');
+                const filterDateInput = document.getElementById('filterDate');
+                const filterStats = document.getElementById('filterStats');
+                const userBlocks = document.querySelectorAll('.user-block');
+
+                function applyFilters() {
+                    const searchKeyword = searchUserInput.value.trim().toLowerCase();
+                    const rawDate = filterDateInput.value;
+                    let targetDateStr = '';
+                    if (rawDate) {
+                        targetDateStr = rawDate.split('-').reverse().join('/'); // Chuyển YYYY-MM-DD sang DD/MM/YYYY
+                    }
+
+                    let visibleUsersCount = 0;
+                    let visibleRowsCount = 0;
+
+                    userBlocks.forEach(block => {
+                        const uname = block.getAttribute('data-username') || '';
+                        const matchUser = !searchKeyword || uname.includes(searchKeyword);
+
+                        if (!matchUser) {
+                            block.style.display = 'none';
+                            return;
+                        }
+
+                        // Kiểm tra các dòng báo cáo bên trong
+                        const rows = block.querySelectorAll('.report-row');
+                        let hasMatchingRow = false;
+
+                        if (rows.length === 0) {
+                            // Không có dòng báo cáo nào, chỉ hiển thị nếu không lọc ngày
+                            if (!targetDateStr) {
+                                block.style.display = 'block';
+                                visibleUsersCount++;
+                            } else {
+                                block.style.display = 'none';
+                            }
+                            return;
+                        }
+
+                        rows.forEach(row => {
+                            const rowDate = row.getAttribute('data-date');
+                            if (!targetDateStr || rowDate === targetDateStr) {
+                                row.style.display = '';
+                                hasMatchingRow = true;
+                                visibleRowsCount++;
+                            } else {
+                                row.style.display = 'none';
+                            }
+                        });
+
+                        if (hasMatchingRow) {
+                            block.style.display = 'block';
+                            visibleUsersCount++;
+                        } else {
+                            block.style.display = 'none';
+                        }
+                    });
+
+                    if (searchKeyword || targetDateStr) {
+                        filterStats.innerText = \`Đang hiển thị \${visibleUsersCount} tài khoản và \${visibleRowsCount} báo cáo khớp.\`;
+                    } else {
+                        filterStats.innerText = '';
+                    }
+                }
+
+                function resetFilters() {
+                    searchUserInput.value = '';
+                    filterDateInput.value = '';
+                    userBlocks.forEach(block => {
+                        block.style.display = 'block';
+                        const rows = block.querySelectorAll('.report-row');
+                        rows.forEach(r => r.style.display = '');
+                    });
+                    filterStats.innerText = '';
+                }
+
+                searchUserInput.addEventListener('input', applyFilters);
+                filterDateInput.addEventListener('change', applyFilters);
+            </script>
+        </body></html>
+    `);
+});
+
+app.post('/admin-add', async (req, res) => {
+    const adminName = req.query.admin;
+    const adminUser = await verifyAdmin(adminName);
+    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+
+    const targetUser = req.body.targetUser;
+    const rawDate = req.body.reportDate;
+    const dateStr = rawDate ? rawDate.split('-').reverse().join('/') : new Date().toLocaleDateString('vi-VN');
+    const result = await calculateScoreAndContent(targetUser, dateStr, req.body);
+
+    if (result) {
+        await sendToSignal(`🛡️ **[ADMIN: ${adminName}] THÊM BÁO CÁO CHO [${targetUser}] - ${dateStr}**\n\n` + result.reportContent);
+        setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
+    }
+
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+});
+
+app.get('/admin-edit', async (req, res) => {
+    const adminName = req.query.admin;
+    const targetUser = req.query.target;
+    const index = parseInt(req.query.index);
+
+    const adminUser = await verifyAdmin(adminName);
+    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+
+    const user = await User.findOne({ username: targetUser });
+    if (!user || isNaN(index) || index < 0 || index >= user.history.length) {
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+    }
+
+    const item = user.history[index];
+    const d = item.details || {};
+
+    res.send(`
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🌐 Chiến Dịch 60 Ngày - Admin Sửa ${targetUser}</title>
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
+        <style>
+            body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:15px}
+            .container{max-width:550px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}
+            h3{text-align:center;color:#2c3e50}
+            .section-title{background:#34495e;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}
+            .form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+            label{font-size:14px;color:#333;flex:2}
+            input[type="number"]{width:70px;padding:6px;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1;text-align:center}
+            button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:20px;cursor:pointer}
+            .back-link{display:block;text-align:center;margin-top:15px;color:#2980b9;text-decoration:none;font-size:14px;font-weight:bold}
+        </style></head>
+        <body>
+            <div class="container">
+                <h3>🛡️ Admin Sửa Ngày ${item.date} của [${targetUser}]</h3>
+                <form action="/admin-update" method="POST">
+                    <input type="hidden" name="admin" value="${adminName}">
+                    <input type="hidden" name="target" value="${targetUser}">
+                    <input type="hidden" name="date" value="${item.date}">
+
+                    <div class="section-title">🌟 MY PAGE (0 hoặc 1)</div>
+                    <div class="form-group"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="${d.tinNguong ?? 1}" min="0" max="1" required></div>
+                    <div class="form-group"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="${d.kinhThanh ?? 1}" min="0" max="1" required></div>
+                    <div class="form-group"><label>Sách LT:</label><input type="number" name="sachLT" value="${d.sachLT ?? 1}" min="0" max="1" required></div>
+                    <div class="form-group"><label>Tập Gđ:</label><input type="number" name="tapGd" value="${d.tapGd ?? 1}" min="0" max="1" required></div>
+
+                    <div class="section-title">🎊 PHÁT BIỂU & EDU</div>
+                    <div class="form-group"><label>Bài mới:</label><input type="number" name="baiMoi" value="${d.baiMoi || 0}" min="0" required></div>
+                    <div class="form-group"><label>Bài cũ:</label><input type="number" name="baiCu" value="${d.baiCu || 0}" min="0" required></div>
+                    <div class="form-group"><label>EDU:</label><input type="number" name="edu" value="${d.edu || 0}" min="0" required></div>
+
+                    <div class="section-title">🔥 TRUDA</div>
+                    <div class="form-group"><label>Đơn Thuần:</label><input type="number" name="donThuan" value="${d.donThuan || 0}" min="0" required></div>
+                    <div class="form-group"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="${d.huuHieu || 0}" min="0" required></div>
+                    <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="${d.ketTrai || 0}" min="0" required></div>
+
+                    <button type="submit">💾 Lưu Thay Đổi</button>
+                </form>
+                <a href="/admin?admin=${encodeURIComponent(adminName)}" class="back-link">⬅️ Quay lại trang Admin</a>
+            </div>
+        </body></html>
+    `);
+});
+
+app.post('/admin-update', async (req, res) => {
+    const { admin: adminName, target: targetUser, date: dateStr } = req.body;
+    const adminUser = await verifyAdmin(adminName);
+    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+
+    const result = await calculateScoreAndContent(targetUser, dateStr, req.body);
+    if (result) {
+        await sendToSignal(`🛡️ **[ADMIN: ${adminName}] CẬP NHẬT CHO [${targetUser}] - NGÀY ${dateStr}**\n\n` + result.reportContent);
+        setTimeout(async () => { await sendToSignal(result.summaryContent); }, 1000);
+    }
+
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+});
+
+app.get('/admin-delete', async (req, res) => {
+    const adminName = req.query.admin;
+    const targetUser = req.query.target;
+    const index = parseInt(req.query.index);
+
+    const adminUser = await verifyAdmin(adminName);
+    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+
+    const user = await User.findOne({ username: targetUser });
+    if (user && !isNaN(index) && index >= 0 && index < user.history.length) {
+        const deletedDay = user.history.splice(index, 1)[0];
+        await user.save();
+        const cumulativeScore = user.history.reduce((sum, item) => sum + (item.score || 0), 0);
+        await sendToSignal(`🛡️ **[ADMIN: ${adminName}] XÓA BÁO CÁO CỦA [${targetUser}]**\nĐã xóa ngày: ${deletedDay.date}\n🏆 Tổng điểm [${targetUser}]: **${cumulativeScore} điểm**`);
+    }
+
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
+});
+
+// --- TRANG DASHBOARD CÁ NHÂN ---
 app.get('/', async (req, res) => {
     const username = req.query.user;
     if (!username) return res.redirect('/login');
@@ -195,12 +540,16 @@ app.get('/', async (req, res) => {
         <a href="/delete?user=${encodeURIComponent(username)}&index=${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a></td></tr>
     `).join('');
 
+    const adminLink = user.role === 'admin'
+        ? `<a href="/admin?admin=${encodeURIComponent(username)}" style="color:#8e44ad;text-decoration:none;font-weight:bold;margin-right:12px;">🛡️ Trang Admin</a>`
+        : '';
+
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - ${username}</title>
-        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;margin:0;padding:15px}.container{max-width:550px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}h2,h3{text-align:center;color:#2c3e50}.top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}.section-title{background:#34495e;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}.form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}label{font-size:14px;color:#333;flex:2}input[type="number"],input[type="date"]{width:70px;padding:6px;text-align:center;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:20px;cursor:pointer}.stats-box{background:#e8f8f5;border:1px solid #a3e4d7;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}th{background:#ecf0f1;padding:8px}</style></head>
-        <body><div class="container"><div class="top-bar"><span>Xin chào, <b>${username}</b></span><a href="/login" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a></div>
+        <body><div class="container"><div class="top-bar"><span>Xin chào, <b>${username}</b></span><div>${adminLink}<a href="/login" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a></div></div>
         <h2>🚀 Quản Lý Chiến Dịch</h2><div class="stats-box">🏆 Tổng điểm tích lũy: <b id="total-score" style="color:#27ae60;font-size:18px;">${cumulativeScore} điểm</b></div>
         <form action="/submit-report?user=${encodeURIComponent(username)}" method="POST">
         <div class="section-title">📅 CHỌN NGÀY BÁO CÁO</div><div class="form-group" style="margin-top:10px;"><label>Ngày báo cáo:</label><input type="date" name="reportDate" value="${defaultDateStr}" required></div>
@@ -220,7 +569,7 @@ app.get('/', async (req, res) => {
         <button type="submit">📤 Gửi Báo Cáo</button></form>
         <div class="section-title" style="margin-top:30px;">📋 Lịch Sử Báo Cáo</div>
         <table><thead><tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead><tbody id="history-rows">${historyRows.length ? historyRows : '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>'}</tbody></table></div>
-        
+
         <script>
             setInterval(async () => {
                 const urlParams = new URLSearchParams(window.location.search);
@@ -271,7 +620,7 @@ app.post('/submit-report', async (req, res) => {
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Thành Công</title>
-        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
         <body><div class="card"><h1>✅ Gửi Báo Cáo Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
     `);
@@ -297,14 +646,14 @@ app.get('/edit', async (req, res) => {
     if (!username) return res.redirect('/login');
     let user = await User.findOne({ username });
     if (!user || isNaN(index) || index < 0 || index >= user.history.length) return res.redirect(`/?user=${encodeURIComponent(username)}`);
-    
+
     const item = user.history[index];
     const d = item.details || {};
 
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Sửa Ngày ${item.date}</title>
-        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>
             body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 15px; }
             .container { max-width: 550px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
@@ -323,23 +672,23 @@ app.get('/edit', async (req, res) => {
                     <input type="hidden" name="user" value="${username}">
                     <input type="hidden" name="index" value="${index}">
                     <input type="hidden" name="date" value="${item.date}">
-                    
+
                     <div class="section-title" style="margin-top:0;">🌟 MY PAGE (Nhập 0 hoặc 1)</div>
                     <div class="form-group" style="margin-top:10px;"><label>Đánh Giá Tín Ngưỡng:</label><input type="number" name="tinNguong" value="${d.tinNguong ?? 1}" min="0" max="1" required></div>
                     <div class="form-group"><label>Kinh thánh:</label><input type="number" name="kinhThanh" value="${d.kinhThanh ?? 1}" min="0" max="1" required></div>
                     <div class="form-group"><label>Sách LT:</label><input type="number" name="sachLT" value="${d.sachLT ?? 1}" min="0" max="1" required></div>
                     <div class="form-group"><label>Tập Gđ:</label><input type="number" name="tapGd" value="${d.tapGd ?? 1}" min="0" max="1" required></div>
-                    
+
                     <div class="section-title">🎊 PHÁT BIỂU & EDU</div>
                     <div class="form-group" style="margin-top:10px;"><label>Bài mới:</label><input type="number" name="baiMoi" value="${d.baiMoi || 0}" min="0" required></div>
                     <div class="form-group"><label>Bài cũ:</label><input type="number" name="baiCu" value="${d.baiCu || 0}" min="0" required></div>
                     <div class="form-group"><label>EDU:</label><input type="number" name="edu" value="${d.edu || 0}" min="0" required></div>
-                    
+
                     <div class="section-title">🔥 TRUDA</div>
                     <div class="form-group" style="margin-top:10px;"><label>Đơn Thuần:</label><input type="number" name="donThuan" value="${d.donThuan || 0}" min="0" required></div>
                     <div class="form-group"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="${d.huuHieu || 0}" min="0" required></div>
                     <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="${d.ketTrai || 0}" min="0" required></div>
-                    
+
                     <button type="submit">💾 Lưu Thay Đổi</button>
                 </form>
                 <a href="/?user=${encodeURIComponent(username)}" class="back-link">⬅️ Quay lại trang chủ</a>
@@ -359,7 +708,7 @@ app.post('/update-edit', async (req, res) => {
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Đã Sửa</title>
-        <link rel="icon" href="https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg" type="image/jpeg">
+        <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;text-align:center;box-sizing:border-box}h1{color:#27ae60;font-size:22px;margin-bottom:15px}a{display:inline-block;margin-top:15px;padding:10px 20px;background:#2980b9;color:white;text-decoration:none;border-radius:6px;font-weight:bold;font-size:14px}</style></head>
         <body><div class="card"><h1>✅ Đã Sửa Thành Công!</h1><a href="/?user=${encodeURIComponent(username)}">Quay Lại Trang Chủ</a></div></body></html>
     `);
@@ -367,7 +716,7 @@ app.post('/update-edit', async (req, res) => {
 
 // --- PHẦN BOT TELEGRAM NÂNG CẤP ---
 const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
-const teleSessions = {}; 
+const teleSessions = {};
 
 const steps = [
     { key: 'tinNguong', label: '🔰 Đánh Giá Tín Ngưỡng (0 hoặc 1)' },
@@ -588,7 +937,7 @@ bot.on('text', async (ctx) => {
             delete teleSessions[ctx.chat.id];
             return ctx.reply('❌ Tên đăng nhập đã tồn tại!');
         }
-        await User.create({ username: session.tempRegUser, password: session.tempRegPass, secret: text, history: [] });
+        await User.create({ username: session.tempRegUser, password: session.tempRegPass, secret: text, role: 'user', history: [] });
         delete teleSessions[ctx.chat.id];
         return ctx.reply('🎉 Đăng ký thành công! Gõ /start để đăng nhập.');
     }
