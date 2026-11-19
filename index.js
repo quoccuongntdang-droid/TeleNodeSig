@@ -6,12 +6,19 @@ const mongoose = require('mongoose');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
 const PHONE = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
 const APIKEY = '911098';
 const FAVICON_URL = 'https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg';
+const BOT_TOKEN = '9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E';
+const WEBHOOK_PATH = '/webhook/telegraf';
+
+const bot = new Telegraf(BOT_TOKEN);
+
+// --- TÍCH HỢP WEBHOOK VÀ PARSER CHO EXPRESS ---
+// Gán middleware xử lý webhook của Telegram trước body parser thông thường
+app.use(bot.webhookCallback(WEBHOOK_PATH));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // --- KẾT NỐI MONGODB ATLAS ---
 const MONGO_URI = process.env.MONGO_URI;
@@ -252,7 +259,6 @@ app.get('/admin', async (req, res) => {
             input[type="number"],input[type="date"],select{padding:6px;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1;text-align:center}
             button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:15px;cursor:pointer}
             
-            /* Khu vực Tìm kiếm & Lọc */
             .filter-card{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:15px;}
             .filter-grid{display:flex;gap:10px;flex-wrap:wrap;}
             .filter-item{flex:1;min-width:180px;}
@@ -275,7 +281,6 @@ app.get('/admin', async (req, res) => {
                     🏆 Tổng điểm toàn hệ thống: <b style="color:#27ae60;font-size:18px;">${totalSystemScore} điểm</b>
                 </div>
 
-                <!-- FORM TÌM KIẾM & LỌC DỮ LIỆU -->
                 <div class="filter-card">
                     <div style="font-size:14px;font-weight:bold;color:#2d3748;margin-bottom:8px;">🔍 BỘ LỌC VÀ TÌM KIẾM BÁO CÁO</div>
                     <div class="filter-grid">
@@ -333,7 +338,7 @@ app.get('/admin', async (req, res) => {
                     const rawDate = filterDateInput.value;
                     let targetDateStr = '';
                     if (rawDate) {
-                        targetDateStr = rawDate.split('-').reverse().join('/'); // Chuyển YYYY-MM-DD sang DD/MM/YYYY
+                        targetDateStr = rawDate.split('-').reverse().join('/');
                     }
 
                     let visibleUsersCount = 0;
@@ -348,12 +353,10 @@ app.get('/admin', async (req, res) => {
                             return;
                         }
 
-                        // Kiểm tra các dòng báo cáo bên trong
                         const rows = block.querySelectorAll('.report-row');
                         let hasMatchingRow = false;
 
                         if (rows.length === 0) {
-                            // Không có dòng báo cáo nào, chỉ hiển thị nếu không lọc ngày
                             if (!targetDateStr) {
                                 block.style.display = 'block';
                                 visibleUsersCount++;
@@ -714,8 +717,7 @@ app.post('/update-edit', async (req, res) => {
     `);
 });
 
-// --- PHẦN BOT TELEGRAM NÂNG CẤP ---
-const bot = new Telegraf('9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E');
+// --- PHẦN BOT TELEGRAM ---
 const teleSessions = {};
 
 const steps = [
@@ -980,5 +982,18 @@ bot.on('text', async (ctx) => {
     ctx.reply('Vui lòng sử dụng các nút bấm hoặc gõ /start để tiếp tục.');
 });
 
-app.listen(PORT, () => { console.log(`Web App đang chạy trên cổng ${PORT}`); });
-bot.launch();
+// --- KHỞI CHẠY WEB SERVER VÀ THIẾT LẬP WEBHOOK ---
+app.listen(PORT, async () => {
+    console.log(`Web App đang chạy trên cổng ${PORT}`);
+
+    // Tự động phát hiện URL thật của app trên Render
+    const domain = process.env.RENDER_EXTERNAL_URL || 'https://telenodesig-8o00.onrender.com';
+    const webhookUrl = `${domain}${WEBHOOK_PATH}`;
+
+    try {
+        await bot.telegram.setWebhook(webhookUrl, { drop_pending_updates: true });
+        console.log(`🚀 Đã kết nối Webhook Telegram thành công: ${webhookUrl}`);
+    } catch (err) {
+        console.error('❌ Lỗi thiết lập Webhook Telegram:', err.message);
+    }
+});
