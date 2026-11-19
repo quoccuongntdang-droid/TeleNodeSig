@@ -20,6 +20,40 @@ const SIGNAL_GROUP_ID = process.env.SIGNAL_GROUP_ID || '';
 const AWAY_TIMEOUT_MS = 2 * 60 * 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
+// Danh sách 10 câu hỏi bảo mật
+const SECURITY_QUESTIONS = [
+    'Trường tiểu học đầu tiên bạn học tên là gì?',
+    'Tên con vật cưng (thú cưng) đầu tiên của bạn là gì?',
+    'Thành phố nơi bố mẹ bạn gặp nhau lần đầu?',
+    'Món ăn yêu thích nhất lúc nhỏ của bạn là gì?',
+    'Biệt danh thời thơ ấu của bạn là gì?',
+    'Người bạn thân nhất thời cấp 2 của bạn tên là gì?',
+    'Bộ phim hoặc bài hát bạn xem/nghe đầu tiên mà nhớ mãi?',
+    'Tên chiếc xe máy hoặc xe đạp đầu tiên của bạn?',
+    'Công việc đầu tiên bạn từng làm là gì?',
+    'Nơi bạn đi du lịch xa lần đầu tiên trong đời là ở đâu?'
+];
+
+const PASSWORD_RULE_TEXT = 'Mật khẩu tối thiểu 8 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt (VD: Abcd@123).';
+
+function isStrongPassword(pass) {
+    if (typeof pass !== 'string') return false;
+    const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d\s]).{8,}$/;
+    return regex.test(pass);
+}
+
+function normalizeAnswer(ans) {
+    return String(ans || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function escapeHtmlAttr(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 const bot = new Telegraf(BOT_TOKEN);
 
 // --- TÍCH HỢP WEBHOOK VÀ PARSER CHO EXPRESS ---
@@ -36,7 +70,11 @@ mongoose.connect(MONGO_URI)
 const userSchema = new mongoose.Schema({
     username: { type: String, unique: true, required: true },
     password: { type: String, required: true },
-    secret: { type: String, required: true },
+    secret: { type: String, default: '' },
+    securityQuestions: [{
+        question: { type: String, required: true },
+        answer: { type: String, required: true }
+    }],
     role: { type: String, default: 'user' },
     history: [{
         date: String,
@@ -269,6 +307,23 @@ app.post('/api/logout', (req, res) => {
     res.json({ ok: true });
 });
 
+app.get('/api/security-questions', async (req, res) => {
+    const username = String(req.query.username || '').trim();
+    if (!username) {
+        return res.status(400).json({ error: 'Vui lòng nhập tên đăng nhập!' });
+    }
+    const user = await User.findOne({ username });
+    if (!user) {
+        return res.status(404).json({ error: 'Không tìm thấy tài khoản!' });
+    }
+    if (!user.securityQuestions || user.securityQuestions.length < 3) {
+        return res.status(400).json({ error: 'Tài khoản này chưa thiết lập 3 câu hỏi bảo mật.' });
+    }
+    return res.json({
+        questions: user.securityQuestions.map(item => item.question)
+    });
+});
+
 app.get('/api/data', async (req, res) => {
     const auth = await authorizeRequest(req, false);
     if (!auth) return res.status(401).json({ error: 'Unauthorized' });
@@ -317,7 +372,7 @@ app.get('/login', (req, res) => {
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Đăng Nhập</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
-        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}.notice{color:#27ae60;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
+        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:15px;box-sizing:border-box}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}.notice{color:#27ae60;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
         <body><div class="card"><h2>🔐 Đăng Nhập</h2>${req.query.msg ? `<div class="notice">${req.query.msg}</div>` : ''}${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-login" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><button type="submit">Đăng Nhập</button></form>
         <div style="display:flex;justify-content:space-between;margin-top:15px;font-size:13px;"><a href="/register">Đăng ký</a><a href="/forgot">Quên mật khẩu?</a></div></div>
@@ -343,26 +398,144 @@ app.get('/logout', (req, res) => {
 });
 
 app.get('/register', (req, res) => {
+    const questionsJson = JSON.stringify(SECURITY_QUESTIONS);
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Đăng Ký</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
-        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
-        <body><div class="card"><h2>📝 Đăng Ký</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
-        <form action="/auth-register" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><input type="text" name="secret" placeholder="Từ khóa bí mật" required><button type="submit">Đăng Ký</button></form>
-        <a href="/login" style="display:block;text-align:center;margin-top:15px;color:#2980b9;text-decoration:none;font-size:13px;">Đã có tài khoản? Đăng nhập</a></div></body></html>
+        <style>
+            body{font-family:Arial,sans-serif;background:#f4f6f9;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:15px;box-sizing:border-box}
+            .card{background:white;padding:24px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:440px;box-sizing:border-box}
+            h2{text-align:center;color:#2c3e50;margin-top:0;margin-bottom:16px}
+            input,select{width:100%;padding:10px;margin:6px 0;border:1px solid #cbd5e0;border-radius:6px;box-sizing:border-box;font-size:14px;background:white}
+            .hint{font-size:12px;color:#4a5568;background:#f8fafc;border-left:3px solid #2980b9;padding:6px 10px;border-radius:4px;margin:4px 0 10px 0;line-height:1.4}
+            .q-box{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:10px}
+            .q-title{font-size:13px;font-weight:bold;color:#2d3748;margin-bottom:4px}
+            button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:14px;font-size:15px}
+            .error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px;font-weight:bold}
+        </style></head>
+        <body><div class="card"><h2>📝 Đăng Ký</h2>${req.query.err ? `<div class="error">${decodeURIComponent(req.query.err)}</div>` : ''}
+        <form id="regForm" action="/auth-register" method="POST">
+            <input type="text" name="username" placeholder="Tên đăng nhập" required>
+            <input type="password" id="regPassword" name="password" placeholder="Mật khẩu" required>
+            <div class="hint">🔒 ${PASSWORD_RULE_TEXT}</div>
+
+            <div class="q-box">
+                <div class="q-title">Câu hỏi bảo mật 1</div>
+                <select id="q1" name="q1" required onchange="refreshQuestionSelects()"></select>
+                <input type="text" name="a1" placeholder="Câu trả lời cho câu hỏi 1" required>
+            </div>
+
+            <div class="q-box">
+                <div class="q-title">Câu hỏi bảo mật 2</div>
+                <select id="q2" name="q2" required onchange="refreshQuestionSelects()"></select>
+                <input type="text" name="a2" placeholder="Câu trả lời cho câu hỏi 2" required>
+            </div>
+
+            <div class="q-box">
+                <div class="q-title">Câu hỏi bảo mật 3</div>
+                <select id="q3" name="q3" required onchange="refreshQuestionSelects()"></select>
+                <input type="text" name="a3" placeholder="Câu trả lời cho câu hỏi 3" required>
+            </div>
+
+            <button type="submit">Đăng Ký</button>
+        </form>
+        <a href="/login" style="display:block;text-align:center;margin-top:15px;color:#2980b9;text-decoration:none;font-size:13px;">Đã có tài khoản? Đăng nhập</a></div>
+
+        <script>
+            const ALL_QUESTIONS = ${questionsJson};
+            const selects = [document.getElementById('q1'), document.getElementById('q2'), document.getElementById('q3')];
+
+            function initSelects() {
+                selects.forEach((sel, idx) => {
+                    sel.innerHTML = '<option value="">-- Chọn câu hỏi bảo mật ' + (idx + 1) + ' --</option>' +
+                        ALL_QUESTIONS.map(q => '<option value="' + q.replace(/"/g, '&quot;') + '">' + q + '</option>').join('');
+                });
+                if (ALL_QUESTIONS.length >= 3) {
+                    selects[0].value = ALL_QUESTIONS[0];
+                    selects[1].value = ALL_QUESTIONS[1];
+                    selects[2].value = ALL_QUESTIONS[2];
+                }
+                refreshQuestionSelects();
+            }
+
+            function refreshQuestionSelects() {
+                const chosen = selects.map(s => s.value);
+                selects.forEach((sel, idx) => {
+                    const currentVal = sel.value;
+                    Array.from(sel.options).forEach(opt => {
+                        if (!opt.value) return;
+                        const usedElsewhere = chosen.some((val, otherIdx) => otherIdx !== idx && val === opt.value);
+                        opt.disabled = usedElsewhere && opt.value !== currentVal;
+                    });
+                });
+            }
+
+            document.getElementById('regForm').addEventListener('submit', function(e) {
+                const pw = document.getElementById('regPassword').value;
+                const strongRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d\\s]).{8,}$/;
+                if (!strongRegex.test(pw)) {
+                    e.preventDefault();
+                    alert('${PASSWORD_RULE_TEXT}');
+                    return;
+                }
+                const vals = selects.map(s => s.value).filter(Boolean);
+                if (vals.length < 3 || new Set(vals).size < 3) {
+                    e.preventDefault();
+                    alert('Vui lòng chọn 3 câu hỏi bảo mật khác nhau!');
+                }
+            });
+
+            initSelects();
+        </script>
+        </body></html>
     `);
 });
 
 app.post('/auth-register', async (req, res) => {
-    const { username, password, secret } = req.body;
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    const { q1, a1, q2, a2, q3, a3 } = req.body;
+
+    if (!username || !password) {
+        return res.redirect('/register?err=' + encodeURIComponent('Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!'));
+    }
+
+    if (!isStrongPassword(password)) {
+        return res.redirect('/register?err=' + encodeURIComponent(PASSWORD_RULE_TEXT));
+    }
+
+    const chosenQuestions = [q1, q2, q3].map(q => String(q || '').trim());
+    const chosenAnswers = [a1, a2, a3].map(a => String(a || '').trim());
+
+    if (
+        chosenQuestions.some(q => !SECURITY_QUESTIONS.includes(q)) ||
+        new Set(chosenQuestions).size < 3 ||
+        chosenAnswers.some(a => !a)
+    ) {
+        return res.redirect('/register?err=' + encodeURIComponent('Vui lòng chọn 3 câu hỏi bảo mật khác nhau và nhập đủ 3 câu trả lời!'));
+    }
+
     try {
         const existing = await User.findOne({ username });
-        if (existing) return res.redirect('/register?err=Tên+đăng+nhập+đã+tồn+tại!');
-        await User.create({ username, password, secret, role: 'user', history: [] });
-        res.redirect(`/login?msg=Đăng+ký+thành+công!+Hãy+đăng+nhập.`);
+        if (existing) return res.redirect('/register?err=' + encodeURIComponent('Tên đăng nhập đã tồn tại!'));
+
+        const secPayload = chosenQuestions.map((q, idx) => ({
+            question: q,
+            answer: normalizeAnswer(chosenAnswers[idx])
+        }));
+
+        await User.create({
+            username,
+            password,
+            secret: '',
+            securityQuestions: secPayload,
+            role: 'user',
+            history: []
+        });
+        res.redirect('/login?msg=' + encodeURIComponent('Đăng ký thành công! Hãy đăng nhập.'));
     } catch (e) {
-        res.redirect('/register?err=Lỗi+đăng+ký+tài+khoản!');
+        res.redirect('/register?err=' + encodeURIComponent('Lỗi đăng ký tài khoản!'));
     }
 });
 
@@ -371,23 +544,123 @@ app.get('/forgot', (req, res) => {
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Khôi Phục</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
-        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#e67e22;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
-        <body><div class="card"><h2>🔑 Khôi Phục</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
-        <form action="/auth-forgot" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="text" name="secret" placeholder="Từ khóa bí mật" required><input type="password" name="newPassword" placeholder="Mật khẩu mới" required><button type="submit">Đổi Mật Khẩu</button></form>
-        <a href="/login" style="display:block;text-align:center;margin-top:15px;color:#2980b9;text-decoration:none;font-size:13px;">Quay lại</a></div></body></html>
+        <style>
+            body{font-family:Arial,sans-serif;background:#f4f6f9;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:15px;box-sizing:border-box}
+            .card{background:white;padding:24px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:440px;box-sizing:border-box}
+            h2{text-align:center;color:#2c3e50;margin-top:0;margin-bottom:16px}
+            input{width:100%;padding:10px;margin:6px 0;border:1px solid #cbd5e0;border-radius:6px;box-sizing:border-box;font-size:14px}
+            .row-inline{display:flex;gap:8px;align-items:center}
+            .btn-load{width:auto;background:#2980b9;color:white;border:none;padding:10px 12px;border-radius:6px;font-weight:bold;cursor:pointer;white-space:nowrap;margin:6px 0}
+            .q-item{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:10px}
+            .q-label{font-size:13px;font-weight:bold;color:#2d3748;margin-bottom:4px;line-height:1.4}
+            .hint{font-size:12px;color:#4a5568;background:#f8fafc;border-left:3px solid #e67e22;padding:6px 10px;border-radius:4px;margin:4px 0 10px 0;line-height:1.4}
+            button[type="submit"]{width:100%;background:#e67e22;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:12px;font-size:15px}
+            .error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px;font-weight:bold}
+        </style></head>
+        <body><div class="card"><h2>🔑 Khôi Phục Mật Khẩu</h2>${req.query.err ? `<div class="error">${decodeURIComponent(req.query.err)}</div>` : ''}
+        <form id="forgotForm" action="/auth-forgot" method="POST">
+            <div class="row-inline">
+                <input type="text" id="fgUsername" name="username" placeholder="Tên đăng nhập" required style="flex:1;margin:6px 0;">
+                <button type="button" class="btn-load" onclick="loadSecurityQuestions()">Tải câu hỏi</button>
+            </div>
+            <div id="fgStatus" style="font-size:12px;color:#4a5568;margin-bottom:6px;"></div>
+
+            <div id="questionsContainer">
+                <div class="q-item">
+                    <div class="q-label">Câu hỏi 1 (nhập tên đăng nhập và bấm "Tải câu hỏi")</div>
+                    <input type="text" name="a1" placeholder="Câu trả lời 1" required>
+                </div>
+                <div class="q-item">
+                    <div class="q-label">Câu hỏi 2</div>
+                    <input type="text" name="a2" placeholder="Câu trả lời 2" required>
+                </div>
+                <div class="q-item">
+                    <div class="q-label">Câu hỏi 3</div>
+                    <input type="text" name="a3" placeholder="Câu trả lời 3" required>
+                </div>
+            </div>
+
+            <input type="password" id="fgNewPass" name="newPassword" placeholder="Mật khẩu mới" required style="margin-top:12px;">
+            <div class="hint">🔒 ${PASSWORD_RULE_TEXT}</div>
+            <button type="submit">Đổi Mật Khẩu</button>
+        </form>
+        <a href="/login" style="display:block;text-align:center;margin-top:15px;color:#2980b9;text-decoration:none;font-size:13px;">Quay lại</a></div>
+
+        <script>
+            async function loadSecurityQuestions() {
+                const uname = document.getElementById('fgUsername').value.trim();
+                const statusEl = document.getElementById('fgStatus');
+                const container = document.getElementById('questionsContainer');
+                if (!uname) {
+                    statusEl.innerHTML = '<span style="color:#c0392b;">Vui lòng nhập tên đăng nhập trước.</span>';
+                    return;
+                }
+                statusEl.innerHTML = 'Đang tải 3 câu hỏi bảo mật...';
+                try {
+                    const res = await fetch('/api/security-questions?username=' + encodeURIComponent(uname));
+                    const data = await res.json();
+                    if (!res.ok || !data.questions) {
+                        statusEl.innerHTML = '<span style="color:#c0392b;">' + (data.error || 'Không tải được câu hỏi.') + '</span>';
+                        return;
+                    }
+                    statusEl.innerHTML = '<span style="color:#27ae60;">✅ Đã tải 3 câu hỏi của tài khoản <b>' + uname + '</b>.</span>';
+                    container.innerHTML = data.questions.map((q, idx) => \`
+                        <div class="q-item">
+                            <div class="q-label">Câu \${idx + 1}: \${q}</div>
+                            <input type="text" name="a\${idx + 1}" placeholder="Nhập câu trả lời \${idx + 1}" required>
+                        </div>
+                    \`).join('');
+                } catch (e) {
+                    statusEl.innerHTML = '<span style="color:#c0392b;">Lỗi kết nối máy chủ.</span>';
+                }
+            }
+
+            document.getElementById('forgotForm').addEventListener('submit', function(e) {
+                const pw = document.getElementById('fgNewPass').value;
+                const strongRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d\\s]).{8,}$/;
+                if (!strongRegex.test(pw)) {
+                    e.preventDefault();
+                    alert('${PASSWORD_RULE_TEXT}');
+                }
+            });
+        </script>
+        </body></html>
     `);
 });
 
 app.post('/auth-forgot', async (req, res) => {
-    const { username, secret, newPassword } = req.body;
-    let user = await User.findOne({ username, secret });
-    if (user) {
-        user.password = newPassword;
-        await user.save();
-        res.redirect('/login?msg=Đổi+mật+khẩu+thành+công!');
-    } else {
-        res.redirect('/forgot?err=Sai+thông+tin!');
+    const username = String(req.body.username || '').trim();
+    const newPassword = String(req.body.newPassword || '');
+    const answers = [
+        normalizeAnswer(req.body.a1),
+        normalizeAnswer(req.body.a2),
+        normalizeAnswer(req.body.a3)
+    ];
+
+    if (!isStrongPassword(newPassword)) {
+        return res.redirect('/forgot?err=' + encodeURIComponent(PASSWORD_RULE_TEXT));
     }
+
+    const user = await User.findOne({ username });
+    if (!user || !user.securityQuestions || user.securityQuestions.length < 3) {
+        return res.redirect('/forgot?err=' + encodeURIComponent('Tài khoản không tồn tại hoặc chưa cài đặt 3 câu hỏi bảo mật!'));
+    }
+
+    const isAllMatched =
+        answers[0] &&
+        answers[1] &&
+        answers[2] &&
+        normalizeAnswer(user.securityQuestions[0].answer) === answers[0] &&
+        normalizeAnswer(user.securityQuestions[1].answer) === answers[1] &&
+        normalizeAnswer(user.securityQuestions[2].answer) === answers[2];
+
+    if (!isAllMatched) {
+        return res.redirect('/forgot?err=' + encodeURIComponent('Câu trả lời cho 3 câu hỏi bảo mật chưa chính xác!'));
+    }
+
+    user.password = newPassword;
+    await user.save();
+    return res.redirect('/login?msg=' + encodeURIComponent('Đổi mật khẩu thành công!'));
 });
 
 // --- TRANG ADMIN QUẢN TRỊ TẤT CẢ TÀI KHOẢN & BÁO CÁO ---
@@ -402,7 +675,7 @@ app.get('/admin', async (req, res) => {
     const defaultDateStr = now.toISOString().split('T')[0];
 
     const userOptions = allUsers
-        .map(u => `<option value="${u.username}">${u.username} (${u.role === 'admin' ? 'Admin' : 'Thành viên'})</option>`)
+        .map(u => `<option value="${escapeHtmlAttr(u.username)}">${escapeHtmlAttr(u.username)} (${u.role === 'admin' ? 'Admin' : 'Thành viên'})</option>`)
         .join('');
 
     const serializedUsersJson = JSON.stringify(
@@ -730,7 +1003,7 @@ app.get('/admin', async (req, res) => {
                                 <div class="acc-tools">
                                     <form action="/admin-change-password?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}" method="POST" class="pw-form">
                                         <input type="hidden" name="targetUser" value="\${u.username}">
-                                        <input type="text" name="newPassword" placeholder="Mật khẩu mới..." required class="pw-input">
+                                        <input type="text" name="newPassword" placeholder="MK mạnh mới..." required class="pw-input">
                                         <button type="submit" class="btn-pw">🔑 Đổi MK</button>
                                     </form>
                                     <div>\${delAccHtml}</div>
@@ -794,9 +1067,14 @@ app.post('/admin-change-password', async (req, res) => {
     const adminName = auth.username;
     const token = auth.token;
     const { targetUser, newPassword } = req.body;
+    const cleanPass = String(newPassword || '').trim();
 
-    if (!targetUser || !newPassword || !newPassword.trim()) {
+    if (!targetUser || !cleanPass) {
         return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&err=${encodeURIComponent('Mật khẩu mới không được để trống!')}`);
+    }
+
+    if (!isStrongPassword(cleanPass)) {
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&err=${encodeURIComponent(PASSWORD_RULE_TEXT)}`);
     }
 
     const targetDoc = await User.findOne({ username: targetUser });
@@ -804,7 +1082,7 @@ app.post('/admin-change-password', async (req, res) => {
         return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&err=${encodeURIComponent('Không tìm thấy tài khoản!')}`);
     }
 
-    targetDoc.password = newPassword.trim();
+    targetDoc.password = cleanPass;
     await targetDoc.save();
     await sendToSignal(`🛡️ **[ADMIN: ${adminName}] ĐÃ ĐỔI MẬT KHẨU CHO TÀI KHOẢN [${targetUser}]**`);
 
@@ -1204,6 +1482,10 @@ async function completeLoginSession(ctx, username) {
     session.role = dbUser.role || 'user';
     delete session.step;
     delete session.tempUser;
+    delete session.tempRegUser;
+    delete session.tempRegPass;
+    delete session.tempRegQuestions;
+    delete session.tempRegAnswers;
     delete session.adminTargetUser;
     delete session.adminEditIndex;
     delete session.adminReportDate;
@@ -1235,9 +1517,22 @@ bot.action('tele_manual_login', (ctx) => {
 });
 
 bot.action('tele_register', (ctx) => {
-    teleSessions[ctx.chat.id] = { loggedIn: false, step: 'WAITING_REG_USER' };
+    teleSessions[ctx.chat.id] = {
+        loggedIn: false,
+        step: 'WAITING_REG_USER',
+        tempRegQuestions: [],
+        tempRegAnswers: []
+    };
     ctx.reply('👉 Nhập **Tên đăng nhập mới**:');
 });
+
+function promptNextTeleSecurityQuestion(ctx, session, qIndex) {
+    const listText = SECURITY_QUESTIONS.map((q, i) => `${i + 1}. ${q}`).join('\n');
+    session.step = `WAITING_REG_Q_${qIndex}`;
+    return ctx.reply(
+        `🛡️ **Chọn câu hỏi bảo mật thứ ${qIndex + 1}/3:**\nGõ số từ **1 đến 10** theo danh sách dưới đây:\n\n${listText}`
+    );
+}
 
 async function showTeleMenu(ctx) {
     const session = teleSessions[ctx.chat.id];
@@ -1347,7 +1642,7 @@ bot.action(/^adm_pw_(.+)$/, async (ctx) => {
     const session = teleSessions[ctx.chat.id];
     session.step = 'ADMIN_WAITING_NEW_PASS';
     session.adminTargetUser = targetUser;
-    ctx.reply(`🔑 Nhập <b>mật khẩu mới</b> cho tài khoản <b>${targetUser}</b>:`, { parse_mode: 'HTML' });
+    ctx.reply(`🔑 Nhập <b>mật khẩu mới</b> cho tài khoản <b>${targetUser}</b>\n<i>(${PASSWORD_RULE_TEXT})</i>:`, { parse_mode: 'HTML' });
 });
 
 bot.action(/^adm_delu_ask_(.+)$/, async (ctx) => {
@@ -1651,36 +1946,84 @@ bot.on('text', async (ctx) => {
     }
 
     if (session.step === 'WAITING_REG_USER') {
+        const existing = await User.findOne({ username: text });
+        if (existing) {
+            return ctx.reply('❌ Tên đăng nhập đã tồn tại! Nhập tên khác:');
+        }
         session.tempRegUser = text;
         session.step = 'WAITING_REG_PASS';
-        ctx.reply('👉 Nhập **Mật khẩu mới**:');
+        ctx.reply(`👉 Nhập **Mật khẩu mới**.\n*(${PASSWORD_RULE_TEXT})*`);
         return;
     }
     if (session.step === 'WAITING_REG_PASS') {
+        if (!isStrongPassword(text)) {
+            return ctx.reply(`❌ Mật khẩu chưa đạt yêu cầu.\n*(${PASSWORD_RULE_TEXT})*\nVui lòng nhập lại mật khẩu:`);
+        }
         session.tempRegPass = text;
-        session.step = 'WAITING_REG_SECRET';
-        ctx.reply('👉 Nhập **Từ khóa bí mật**:');
-        return;
+        session.tempRegQuestions = [];
+        session.tempRegAnswers = [];
+        return promptNextTeleSecurityQuestion(ctx, session, 0);
     }
-    if (session.step === 'WAITING_REG_SECRET') {
+
+    if (/^WAITING_REG_Q_([012])$/.test(session.step || '')) {
+        const qIdx = parseInt(session.step.match(/^WAITING_REG_Q_([012])$/)[1], 10);
+        const choiceNum = parseInt(text, 10);
+        if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > SECURITY_QUESTIONS.length) {
+            return ctx.reply(`❌ Vui lòng chỉ gõ số từ 1 đến ${SECURITY_QUESTIONS.length}.`);
+        }
+        const selectedQuestion = SECURITY_QUESTIONS[choiceNum - 1];
+        if (session.tempRegQuestions.includes(selectedQuestion)) {
+            return ctx.reply('❌ Câu hỏi này đã được chọn rồi, hãy chọn số câu hỏi khác.');
+        }
+        session.tempRegQuestions[qIdx] = selectedQuestion;
+        session.step = `WAITING_REG_A_${qIdx}`;
+        return ctx.reply(`✍️ Nhập câu trả lời cho câu hỏi:\n**${selectedQuestion}**`);
+    }
+
+    if (/^WAITING_REG_A_([012])$/.test(session.step || '')) {
+        const aIdx = parseInt(session.step.match(/^WAITING_REG_A_([012])$/)[1], 10);
+        if (!text) {
+            return ctx.reply('❌ Câu trả lời không được để trống. Vui lòng nhập lại:');
+        }
+        session.tempRegAnswers[aIdx] = text;
+        if (aIdx < 2) {
+            return promptNextTeleSecurityQuestion(ctx, session, aIdx + 1);
+        }
+
         const existing = await User.findOne({ username: session.tempRegUser });
         if (existing) {
             delete teleSessions[ctx.chat.id];
-            return ctx.reply('❌ Tên đăng nhập đã tồn tại!');
+            return ctx.reply('❌ Tên đăng nhập đã tồn tại! Gõ /start để thử lại.');
         }
-        await User.create({ username: session.tempRegUser, password: session.tempRegPass, secret: text, role: 'user', history: [] });
+
+        const secPayload = session.tempRegQuestions.map((q, i) => ({
+            question: q,
+            answer: normalizeAnswer(session.tempRegAnswers[i])
+        }));
+
+        await User.create({
+            username: session.tempRegUser,
+            password: session.tempRegPass,
+            secret: '',
+            securityQuestions: secPayload,
+            role: 'user',
+            history: []
+        });
         delete teleSessions[ctx.chat.id];
-        return ctx.reply('🎉 Đăng ký thành công! Gõ /start để đăng nhập.');
+        return ctx.reply('🎉 Đăng ký thành công (đã lưu mật khẩu mạnh & 3 câu hỏi bảo mật)! Gõ /start để đăng nhập.');
     }
 
     if (session.step === 'ADMIN_WAITING_NEW_PASS') {
         const adminDoc = await ensureTeleAdmin(ctx);
         if (!adminDoc) return;
         const targetUser = session.adminTargetUser;
+
+        if (!text || !isStrongPassword(text)) {
+            return ctx.reply(`❌ Mật khẩu mới chưa đạt yêu cầu.\n<i>(${PASSWORD_RULE_TEXT})</i>\nNhập lại mật khẩu mới cho <b>${targetUser}</b>:`, { parse_mode: 'HTML' });
+        }
+
         delete session.step;
         delete session.adminTargetUser;
-
-        if (!text) return ctx.reply('❌ Mật khẩu mới không được rỗng.');
         const targetDoc = await User.findOne({ username: targetUser });
         if (!targetDoc) return ctx.reply('❌ Không tìm thấy tài khoản.');
 
