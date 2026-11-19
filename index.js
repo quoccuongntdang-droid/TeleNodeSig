@@ -206,9 +206,17 @@ app.get('/admin', async (req, res) => {
         .map(u => `<option value="${u.username}">${u.username} (${u.role === 'admin' ? 'Admin' : 'Thành viên'})</option>`)
         .join('');
 
-    const dropdownItemsHtml = allUsers
-        .map(u => `<div class="dropdown-option" onclick="selectDropdownUser('${u.username}')">👤 <b>${u.username}</b> <span style="color:#666;font-size:12px;">(${u.role === 'admin' ? 'Admin' : 'Thành viên'} • ${(u.history || []).length} ngày)</span></div>`)
-        .join('');
+    const serializedUsersJson = JSON.stringify(
+        allUsers.map(u => ({
+            username: u.username,
+            role: u.role || 'user',
+            history: (u.history || []).map((item, idx) => ({
+                index: idx,
+                date: item.date,
+                score: item.score || 0
+            }))
+        }))
+    );
 
     let totalSystemScore = 0;
     let totalReportsCount = 0;
@@ -221,7 +229,7 @@ app.get('/admin', async (req, res) => {
 
         const rowsHtml = uHistory.length
             ? uHistory.map((item, idx) => `
-                <tr class="report-row" data-date="${item.date}">
+                <tr>
                     <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.date}</td>
                     <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#27ae60;">+${item.score} đ</td>
                     <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
@@ -230,16 +238,16 @@ app.get('/admin', async (req, res) => {
                     </td>
                 </tr>
             `).join('')
-            : `<tr class="empty-row"><td colspan="3" style="text-align:center;padding:10px;color:#777;">Chưa có báo cáo</td></tr>`;
+            : `<tr><td colspan="3" style="text-align:center;padding:10px;color:#777;">Chưa có báo cáo</td></tr>`;
 
         const deleteUserBtn = u.username === adminName
             ? `<span style="font-size:11px;color:#888;background:#edf2f7;padding:4px 8px;border-radius:4px;">Tài khoản hiện tại</span>`
             : `<a href="/admin-delete-user?admin=${encodeURIComponent(adminName)}&target=${encodeURIComponent(u.username)}" onclick="return confirm('XÓA VĨNH VIỄN tài khoản ${u.username} và toàn bộ báo cáo của tài khoản này?');" style="background:#c0392b;color:white;padding:5px 10px;text-decoration:none;border-radius:5px;font-size:12px;font-weight:bold;">🗑️ Xóa tài khoản</a>`;
 
         return `
-            <div class="user-block" data-username="${u.username.toLowerCase()}" style="border:1px solid #dce4ec;border-radius:10px;padding:12px;margin-top:15px;background:#fafbfd;">
+            <div style="border:1px solid #dce4ec;border-radius:10px;padding:12px;margin-top:15px;background:#fafbfd;">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-                    <span>👤 <b class="uname-text">${u.username}</b> ${u.role === 'admin' ? '<span style="background:#8e44ad;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">ADMIN</span>' : ''}</span>
+                    <span>👤 <b>${u.username}</b> ${u.role === 'admin' ? '<span style="background:#8e44ad;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">ADMIN</span>' : ''}</span>
                     <span style="font-weight:bold;color:#2980b9;">${uScore} điểm (${uHistory.length} ngày)</span>
                 </div>
 
@@ -284,12 +292,12 @@ app.get('/admin', async (req, res) => {
 
             .filter-card{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:15px;}
             .filter-grid{display:flex;gap:10px;flex-wrap:wrap;}
-            .filter-item{flex:1;min-width:200px;position:relative;}
+            .filter-item{flex:1;min-width:200px;}
             .filter-item label{display:block;font-size:13px;font-weight:bold;margin-bottom:5px;color:#4a5568;}
             .filter-input{width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;box-sizing:border-box;}
-            .user-dropdown-list{display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #cbd5e0;border-top:none;border-radius:0 0 6px 6px;box-shadow:0 8px 16px rgba(0,0,0,0.12);max-height:190px;overflow-y:auto;z-index:30;}
-            .dropdown-option{padding:8px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9;}
-            .dropdown-option:hover{background:#ebf8ff;}
+            .live-results-box{margin-top:12px;background:white;border:1px solid #dbe2ea;border-radius:8px;padding:10px;}
+            .live-user-chip{display:inline-block;padding:4px 10px;margin:3px;border-radius:999px;font-size:12px;background:#edf2f7;color:#2d3748;cursor:pointer;border:1px solid transparent;}
+            .live-user-chip.active{background:#2980b9;color:white;font-weight:bold;}
             .btn-reset{background:#718096;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:bold;margin-top:10px;width:auto;}
         </style></head>
         <body>
@@ -311,21 +319,25 @@ app.get('/admin', async (req, res) => {
                 <div class="filter-card">
                     <div style="font-size:14px;font-weight:bold;color:#2d3748;margin-bottom:8px;">🔍 BỘ LỌC VÀ TÌM KIẾM BÁO CÁO</div>
                     <div class="filter-grid">
-                        <div class="filter-item" id="userDropdownWrapper">
-                            <label>🔎 Tìm tên tài khoản (bấm để xổ danh sách):</label>
-                            <input type="text" id="searchUser" class="filter-input" placeholder="Gõ hoặc chọn tài khoản..." autocomplete="off" onfocus="openUserDropdown()">
-                            <div id="userDropdownList" class="user-dropdown-list">
-                                <div class="dropdown-option" onclick="selectDropdownUser('')">✨ Tất cả tài khoản</div>
-                                ${dropdownItemsHtml}
-                            </div>
+                        <div class="filter-item">
+                            <label>🔎 Tìm tên tài khoản:</label>
+                            <input type="text" id="searchUser" class="filter-input" placeholder="Gõ tên tài khoản để lọc..." autocomplete="off">
                         </div>
                         <div class="filter-item">
                             <label>📅 Lọc theo ngày báo cáo (để trống = mọi ngày):</label>
                             <input type="date" id="filterDate" class="filter-input">
                         </div>
                     </div>
-                    <button type="button" class="btn-reset" onclick="resetFilters()">🔄 Xóa bộ lọc</button>
-                    <span id="filterStats" style="font-size:13px;color:#4a5568;margin-left:10px;font-style:italic;"></span>
+                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:8px;">
+                        <button type="button" class="btn-reset" onclick="resetFilters()">🔄 Xóa bộ lọc</button>
+                        <span id="filterStats" style="font-size:13px;color:#4a5568;font-style:italic;margin-top:10px;"></span>
+                    </div>
+
+                    <div class="live-results-box">
+                        <div style="font-size:12px;font-weight:bold;color:#4a5568;margin-bottom:6px;">📋 DANH SÁCH TÀI KHOẢN & KẾT QUẢ LỌC NGAY BÊN DƯỚI:</div>
+                        <div id="liveUserChips" style="margin-bottom:8px;"></div>
+                        <div id="liveFilteredTable"></div>
+                    </div>
                 </div>
 
                 <form action="/admin-add?admin=${encodeURIComponent(adminName)}" method="POST">
@@ -359,115 +371,88 @@ app.get('/admin', async (req, res) => {
             </div>
 
             <script>
+                const ADMIN_NAME = ${JSON.stringify(adminName)};
+                const ALL_USERS_DATA = ${serializedUsersJson};
+
                 const searchUserInput = document.getElementById('searchUser');
                 const filterDateInput = document.getElementById('filterDate');
                 const filterStats = document.getElementById('filterStats');
-                const userDropdownList = document.getElementById('userDropdownList');
-                const userBlocks = document.querySelectorAll('.user-block');
-                const dropdownOptions = document.querySelectorAll('.dropdown-option');
+                const liveUserChips = document.getElementById('liveUserChips');
+                const liveFilteredTable = document.getElementById('liveFilteredTable');
 
-                function openUserDropdown() {
-                    filterDropdownOptions();
-                    userDropdownList.style.display = 'block';
+                function pickChipUser(uname) {
+                    if (searchUserInput.value.trim().toLowerCase() === uname.toLowerCase()) {
+                        searchUserInput.value = '';
+                    } else {
+                        searchUserInput.value = uname;
+                    }
+                    renderLiveFilterSection();
                 }
 
-                function selectDropdownUser(uname) {
-                    searchUserInput.value = uname;
-                    userDropdownList.style.display = 'none';
-                    applyFilters();
-                }
-
-                function filterDropdownOptions() {
+                function renderLiveFilterSection() {
                     const kw = searchUserInput.value.trim().toLowerCase();
-                    dropdownOptions.forEach(opt => {
-                        const txt = opt.innerText.toLowerCase();
-                        opt.style.display = (!kw || txt.includes(kw)) ? 'block' : 'none';
-                    });
-                }
-
-                document.addEventListener('click', (e) => {
-                    const wrapper = document.getElementById('userDropdownWrapper');
-                    if (wrapper && !wrapper.contains(e.target)) {
-                        userDropdownList.style.display = 'none';
-                    }
-                });
-
-                function applyFilters() {
-                    const searchKeyword = searchUserInput.value.trim().toLowerCase();
                     const rawDate = filterDateInput.value;
-                    let targetDateStr = '';
-                    if (rawDate) {
-                        targetDateStr = rawDate.split('-').reverse().join('/');
-                    }
+                    const targetDateStr = rawDate ? rawDate.split('-').reverse().join('/') : '';
 
-                    let visibleUsersCount = 0;
-                    let visibleRowsCount = 0;
+                    const matchingUsers = ALL_USERS_DATA.filter(u => !kw || u.username.toLowerCase().includes(kw));
 
-                    userBlocks.forEach(block => {
-                        const uname = block.getAttribute('data-username') || '';
-                        const matchUser = !searchKeyword || uname.includes(searchKeyword);
+                    liveUserChips.innerHTML = matchingUsers.length
+                        ? matchingUsers.map(u => {
+                            const isActive = kw && u.username.toLowerCase() === kw;
+                            return \`<span class="live-user-chip \${isActive ? 'active' : ''}" onclick="pickChipUser('\${u.username}')">👤 \${u.username} (\${u.history.length})</span>\`;
+                        }).join('')
+                        : '<span style="font-size:12px;color:#888;">Không có tài khoản khớp từ khóa.</span>';
 
-                        if (!matchUser) {
-                            block.style.display = 'none';
-                            return;
-                        }
-
-                        const rows = block.querySelectorAll('.report-row');
-                        let hasMatchingRow = false;
-
-                        if (rows.length === 0) {
-                            if (!targetDateStr) {
-                                block.style.display = 'block';
-                                visibleUsersCount++;
-                            } else {
-                                block.style.display = 'none';
-                            }
-                            return;
-                        }
-
-                        rows.forEach(row => {
-                            const rowDate = row.getAttribute('data-date');
-                            if (!targetDateStr || rowDate === targetDateStr) {
-                                row.style.display = '';
-                                hasMatchingRow = true;
-                                visibleRowsCount++;
-                            } else {
-                                row.style.display = 'none';
+                    let matchedRows = [];
+                    matchingUsers.forEach(u => {
+                        u.history.forEach(item => {
+                            if (!targetDateStr || item.date === targetDateStr) {
+                                matchedRows.push({
+                                    username: u.username,
+                                    index: item.index,
+                                    date: item.date,
+                                    score: item.score
+                                });
                             }
                         });
-
-                        if (hasMatchingRow) {
-                            block.style.display = 'block';
-                            visibleUsersCount++;
-                        } else {
-                            block.style.display = 'none';
-                        }
                     });
 
-                    if (searchKeyword || targetDateStr) {
-                        filterStats.innerText = \`Đang hiển thị \${visibleUsersCount} tài khoản và \${visibleRowsCount} báo cáo khớp.\`;
-                    } else {
-                        filterStats.innerText = '';
+                    filterStats.innerText = \`Khớp \${matchingUsers.length} tài khoản • \${matchedRows.length} báo cáo\`;
+
+                    if (!matchedRows.length) {
+                        liveFilteredTable.innerHTML = '<div style="font-size:13px;color:#777;text-align:center;padding:8px;">Không có báo cáo nào khớp với bộ lọc hiện tại.</div>';
+                        return;
                     }
+
+                    const rowsHtml = matchedRows.map(r => \`
+                        <tr>
+                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">\${r.username}</td>
+                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">\${r.date}</td>
+                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#27ae60;">+\${r.score} đ</td>
+                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">
+                                <a href="/admin-edit?admin=\${encodeURIComponent(ADMIN_NAME)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" style="background:#f39c12;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;margin-right:4px;">Sửa</a>
+                                <a href="/admin-delete?admin=\${encodeURIComponent(ADMIN_NAME)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" onclick="return confirm('Xóa báo cáo ngày \${r.date} của \${r.username}?');" style="background:#e74c3c;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;">Xóa</a>
+                            </td>
+                        </tr>
+                    \`).join('');
+
+                    liveFilteredTable.innerHTML = \`
+                        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <thead><tr style="background:#f1f5f9;"><th>Tài khoản</th><th>Ngày</th><th>Điểm</th><th>Thao tác</th></tr></thead>
+                            <tbody>\${rowsHtml}</tbody>
+                        </table>
+                    \`;
                 }
 
                 function resetFilters() {
                     searchUserInput.value = '';
                     filterDateInput.value = '';
-                    userBlocks.forEach(block => {
-                        block.style.display = 'block';
-                        const rows = block.querySelectorAll('.report-row');
-                        rows.forEach(r => r.style.display = '');
-                    });
-                    filterStats.innerText = '';
+                    renderLiveFilterSection();
                 }
 
-                searchUserInput.addEventListener('input', () => {
-                    filterDropdownOptions();
-                    userDropdownList.style.display = 'block';
-                    applyFilters();
-                });
-                filterDateInput.addEventListener('change', applyFilters);
+                searchUserInput.addEventListener('input', renderLiveFilterSection);
+                filterDateInput.addEventListener('change', renderLiveFilterSection);
+                renderLiveFilterSection();
             </script>
         </body></html>
     `);
