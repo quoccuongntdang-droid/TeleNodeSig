@@ -7,11 +7,14 @@ const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const PHONE = 'f774da57-44c0-4e4e-8f57-4e4fd53490a0';
-const APIKEY = '911098';
 const FAVICON_URL = 'https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg';
 const BOT_TOKEN = '9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E';
 const WEBHOOK_PATH = '/webhook/telegraf';
+
+// Cấu hình gửi báo cáo vào nhóm Signal qua Signal CLI REST API
+const SIGNAL_API_URL = (process.env.SIGNAL_API_URL || '').replace(/\/+$/, '');
+const SIGNAL_SENDER_NUMBER = process.env.SIGNAL_SENDER_NUMBER || '';
+const SIGNAL_GROUP_ID = process.env.SIGNAL_GROUP_ID || '';
 
 // Thời gian rời khỏi tab tối đa trước khi tự động đăng xuất (mặc định: 2 phút)
 const AWAY_TIMEOUT_MS = 2 * 60 * 1000;
@@ -79,12 +82,28 @@ function revokeSession(token) {
     if (token) activeSessions.delete(token);
 }
 
-// --- HÀM GỬI SIGNAL ---
+// --- HÀM GỬI BÁO CÁO VÀO NHÓM SIGNAL ---
 async function sendToSignal(message) {
+    if (!SIGNAL_API_URL || !SIGNAL_SENDER_NUMBER || !SIGNAL_GROUP_ID) {
+        console.warn('⚠️ Chưa cấu hình đủ SIGNAL_API_URL, SIGNAL_SENDER_NUMBER hoặc SIGNAL_GROUP_ID.');
+        return;
+    }
+
     try {
-        await axios.get(`https://signal.callmebot.com/signal/send.php?phone=${PHONE}&apikey=${APIKEY}&text=${encodeURIComponent(message)}`);
+        await axios.post(
+            `${SIGNAL_API_URL}/v2/send`,
+            {
+                message,
+                number: SIGNAL_SENDER_NUMBER,
+                recipients: [SIGNAL_GROUP_ID]
+            },
+            {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 15000
+            }
+        );
     } catch (e) {
-        console.error('Lỗi gửi Signal:', e.message);
+        console.error('❌ Lỗi gửi báo cáo tới nhóm Signal:', e.response?.data || e.message);
     }
 }
 
@@ -1572,7 +1591,7 @@ bot.action(/tele_del_(\d+)/, async (ctx) => {
         const deleted = user.history.splice(index, 1)[0];
         await user.save();
         const cumulativeScore = user.history.reduce((sum, item) => sum + (item.score || 0), 0);
-        sendToSignal(`🗑️ **[${session.username}] XÓA BÁO CÁO**\nĐã xóa ngày: ${deleted.date}\n🏆 Tổng điểm: **${cumulativeScore} điểm**`);
+        await sendToSignal(`🗑️ **[${session.username}] XÓA BÁO CÁO**\nĐã xóa ngày: ${deleted.date}\n🏆 Tổng điểm: **${cumulativeScore} điểm**`);
         ctx.reply(`✅ Đã xóa ngày ${deleted.date}!`);
         showTeleMenu(ctx);
     }
