@@ -15,7 +15,6 @@ const WEBHOOK_PATH = '/webhook/telegraf';
 const bot = new Telegraf(BOT_TOKEN);
 
 // --- TÍCH HỢP WEBHOOK VÀ PARSER CHO EXPRESS ---
-// Gán middleware xử lý webhook của Telegram trước body parser thông thường
 app.use(bot.webhookCallback(WEBHOOK_PATH));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -31,7 +30,7 @@ const userSchema = new mongoose.Schema({
     username: { type: String, unique: true, required: true },
     password: { type: String, required: true },
     secret: { type: String, required: true },
-    role: { type: String, default: 'user' }, // 'user' hoặc 'admin'
+    role: { type: String, default: 'user' },
     history: [{
         date: String,
         score: Number,
@@ -130,8 +129,8 @@ app.get('/login', (req, res) => {
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Đăng Nhập</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
-        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
-        <body><div class="card"><h2>🔐 Đăng Nhập</h2>${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
+        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}.notice{color:#27ae60;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
+        <body><div class="card"><h2>🔐 Đăng Nhập</h2>${req.query.msg ? `<div class="notice">${req.query.msg}</div>` : ''}${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
         <form action="/auth-login" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><button type="submit">Đăng Nhập</button></form>
         <div style="display:flex;justify-content:space-between;margin-top:15px;font-size:13px;"><a href="/register">Đăng ký</a><a href="/forgot">Quên mật khẩu?</a></div></div></body></html>
     `);
@@ -163,7 +162,7 @@ app.post('/auth-register', async (req, res) => {
         const existing = await User.findOne({ username });
         if (existing) return res.redirect('/register?err=Tên+đăng+nhập+đã+tồn+tại!');
         await User.create({ username, password, secret, role: 'user', history: [] });
-        res.redirect(`/login?err=Đăng+ký+thành+công!+Hãy+đăng+nhập.`);
+        res.redirect(`/login?msg=Đăng+ký+thành+công!+Hãy+đăng+nhập.`);
     } catch (e) {
         res.redirect('/register?err=Lỗi+đăng+ký+tài+khoản!');
     }
@@ -187,13 +186,13 @@ app.post('/auth-forgot', async (req, res) => {
     if (user) {
         user.password = newPassword;
         await user.save();
-        res.redirect('/login?err=Đổi+mật+khẩu+thành+công!');
+        res.redirect('/login?msg=Đổi+mật+khẩu+thành+công!');
     } else {
         res.redirect('/forgot?err=Sai+thông+tin!');
     }
 });
 
-// --- TRANG ADMIN QUẢN TRỊ TẤT CẢ TÀI KHOẢN & BÁO CÁO (KÈM BỘ TÌM KIẾM & LỌC) ---
+// --- TRANG ADMIN QUẢN TRỊ TẤT CẢ TÀI KHOẢN & BÁO CÁO ---
 app.get('/admin', async (req, res) => {
     const adminName = req.query.admin;
     const adminUser = await verifyAdmin(adminName);
@@ -205,6 +204,10 @@ app.get('/admin', async (req, res) => {
 
     const userOptions = allUsers
         .map(u => `<option value="${u.username}">${u.username} (${u.role === 'admin' ? 'Admin' : 'Thành viên'})</option>`)
+        .join('');
+
+    const dropdownItemsHtml = allUsers
+        .map(u => `<div class="dropdown-option" onclick="selectDropdownUser('${u.username}')">👤 <b>${u.username}</b> <span style="color:#666;font-size:12px;">(${u.role === 'admin' ? 'Admin' : 'Thành viên'} • ${(u.history || []).length} ngày)</span></div>`)
         .join('');
 
     let totalSystemScore = 0;
@@ -229,12 +232,26 @@ app.get('/admin', async (req, res) => {
             `).join('')
             : `<tr class="empty-row"><td colspan="3" style="text-align:center;padding:10px;color:#777;">Chưa có báo cáo</td></tr>`;
 
+        const deleteUserBtn = u.username === adminName
+            ? `<span style="font-size:11px;color:#888;background:#edf2f7;padding:4px 8px;border-radius:4px;">Tài khoản hiện tại</span>`
+            : `<a href="/admin-delete-user?admin=${encodeURIComponent(adminName)}&target=${encodeURIComponent(u.username)}" onclick="return confirm('XÓA VĨNH VIỄN tài khoản ${u.username} và toàn bộ báo cáo của tài khoản này?');" style="background:#c0392b;color:white;padding:5px 10px;text-decoration:none;border-radius:5px;font-size:12px;font-weight:bold;">🗑️ Xóa tài khoản</a>`;
+
         return `
             <div class="user-block" data-username="${u.username.toLowerCase()}" style="border:1px solid #dce4ec;border-radius:10px;padding:12px;margin-top:15px;background:#fafbfd;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
                     <span>👤 <b class="uname-text">${u.username}</b> ${u.role === 'admin' ? '<span style="background:#8e44ad;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">ADMIN</span>' : ''}</span>
                     <span style="font-weight:bold;color:#2980b9;">${uScore} điểm (${uHistory.length} ngày)</span>
                 </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:#f1f5f9;padding:8px 10px;border-radius:7px;margin-bottom:10px;">
+                    <form action="/admin-change-password?admin=${encodeURIComponent(adminName)}" method="POST" style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px;margin:0;">
+                        <input type="hidden" name="targetUser" value="${u.username}">
+                        <input type="text" name="newPassword" placeholder="Mật khẩu mới..." required style="padding:5px 8px;border:1px solid #cbd5e0;border-radius:5px;font-size:12px;flex:1;min-width:110px;">
+                        <button type="submit" style="width:auto;margin:0;padding:5px 10px;font-size:12px;background:#2980b9;border-radius:5px;">🔑 Đổi MK</button>
+                    </form>
+                    <div>${deleteUserBtn}</div>
+                </div>
+
                 <table style="width:100%;border-collapse:collapse;font-size:13px;background:white;">
                     <thead><tr style="background:#ecf0f1;"><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead>
                     <tbody>${rowsHtml}</tbody>
@@ -242,6 +259,12 @@ app.get('/admin', async (req, res) => {
             </div>
         `;
     }).join('');
+
+    const statusBanner = req.query.msg
+        ? `<div style="background:#e8f8f5;border:1px solid #a3e4d7;color:#1e8449;padding:10px 12px;border-radius:8px;margin-bottom:15px;font-size:13px;font-weight:bold;text-align:center;">${decodeURIComponent(req.query.msg)}</div>`
+        : req.query.err
+            ? `<div style="background:#fdedec;border:1px solid #f5b7b1;color:#c0392b;padding:10px 12px;border-radius:8px;margin-bottom:15px;font-size:13px;font-weight:bold;text-align:center;">${decodeURIComponent(req.query.err)}</div>`
+            : '';
 
     res.send(`
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -258,13 +281,16 @@ app.get('/admin', async (req, res) => {
             label{font-size:14px;color:#333;flex:2}
             input[type="number"],input[type="date"],select{padding:6px;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1;text-align:center}
             button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:15px;cursor:pointer}
-            
+
             .filter-card{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:15px;}
             .filter-grid{display:flex;gap:10px;flex-wrap:wrap;}
-            .filter-item{flex:1;min-width:180px;}
+            .filter-item{flex:1;min-width:200px;position:relative;}
             .filter-item label{display:block;font-size:13px;font-weight:bold;margin-bottom:5px;color:#4a5568;}
             .filter-input{width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;box-sizing:border-box;}
-            .btn-reset{background:#718096;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:bold;margin-top:8px;}
+            .user-dropdown-list{display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid #cbd5e0;border-top:none;border-radius:0 0 6px 6px;box-shadow:0 8px 16px rgba(0,0,0,0.12);max-height:190px;overflow-y:auto;z-index:30;}
+            .dropdown-option{padding:8px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9;}
+            .dropdown-option:hover{background:#ebf8ff;}
+            .btn-reset{background:#718096;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:bold;margin-top:10px;width:auto;}
         </style></head>
         <body>
             <div class="container">
@@ -276,6 +302,7 @@ app.get('/admin', async (req, res) => {
                     </div>
                 </div>
                 <h2>🛠️ Quản Trị Toàn Hệ Thống</h2>
+                ${statusBanner}
                 <div class="stats-box">
                     👥 Tài khoản: <b>${allUsers.length}</b> | 📋 Tổng báo cáo: <b>${totalReportsCount}</b><br>
                     🏆 Tổng điểm toàn hệ thống: <b style="color:#27ae60;font-size:18px;">${totalSystemScore} điểm</b>
@@ -284,12 +311,16 @@ app.get('/admin', async (req, res) => {
                 <div class="filter-card">
                     <div style="font-size:14px;font-weight:bold;color:#2d3748;margin-bottom:8px;">🔍 BỘ LỌC VÀ TÌM KIẾM BÁO CÁO</div>
                     <div class="filter-grid">
-                        <div class="filter-item">
-                            <label>🔎 Tìm tên tài khoản:</label>
-                            <input type="text" id="searchUser" class="filter-input" placeholder="Nhập username...">
+                        <div class="filter-item" id="userDropdownWrapper">
+                            <label>🔎 Tìm tên tài khoản (bấm để xổ danh sách):</label>
+                            <input type="text" id="searchUser" class="filter-input" placeholder="Gõ hoặc chọn tài khoản..." autocomplete="off" onfocus="openUserDropdown()">
+                            <div id="userDropdownList" class="user-dropdown-list">
+                                <div class="dropdown-option" onclick="selectDropdownUser('')">✨ Tất cả tài khoản</div>
+                                ${dropdownItemsHtml}
+                            </div>
                         </div>
                         <div class="filter-item">
-                            <label>📅 Lọc theo ngày báo cáo:</label>
+                            <label>📅 Lọc theo ngày báo cáo (để trống = mọi ngày):</label>
                             <input type="date" id="filterDate" class="filter-input">
                         </div>
                     </div>
@@ -321,7 +352,7 @@ app.get('/admin', async (req, res) => {
                     <button type="submit">💾 Lưu Báo Cáo Cho Tài Khoản</button>
                 </form>
 
-                <div class="section-title" style="margin-top:30px;">📊 Toàn Bộ Báo Cáo Các Tài Khoản</div>
+                <div class="section-title" style="margin-top:30px;">📊 Toàn Bộ Tài Khoản & Báo Cáo</div>
                 <div id="usersListContainer">
                     ${userSectionsHtml}
                 </div>
@@ -331,7 +362,35 @@ app.get('/admin', async (req, res) => {
                 const searchUserInput = document.getElementById('searchUser');
                 const filterDateInput = document.getElementById('filterDate');
                 const filterStats = document.getElementById('filterStats');
+                const userDropdownList = document.getElementById('userDropdownList');
                 const userBlocks = document.querySelectorAll('.user-block');
+                const dropdownOptions = document.querySelectorAll('.dropdown-option');
+
+                function openUserDropdown() {
+                    filterDropdownOptions();
+                    userDropdownList.style.display = 'block';
+                }
+
+                function selectDropdownUser(uname) {
+                    searchUserInput.value = uname;
+                    userDropdownList.style.display = 'none';
+                    applyFilters();
+                }
+
+                function filterDropdownOptions() {
+                    const kw = searchUserInput.value.trim().toLowerCase();
+                    dropdownOptions.forEach(opt => {
+                        const txt = opt.innerText.toLowerCase();
+                        opt.style.display = (!kw || txt.includes(kw)) ? 'block' : 'none';
+                    });
+                }
+
+                document.addEventListener('click', (e) => {
+                    const wrapper = document.getElementById('userDropdownWrapper');
+                    if (wrapper && !wrapper.contains(e.target)) {
+                        userDropdownList.style.display = 'none';
+                    }
+                });
 
                 function applyFilters() {
                     const searchKeyword = searchUserInput.value.trim().toLowerCase();
@@ -403,11 +462,56 @@ app.get('/admin', async (req, res) => {
                     filterStats.innerText = '';
                 }
 
-                searchUserInput.addEventListener('input', applyFilters);
+                searchUserInput.addEventListener('input', () => {
+                    filterDropdownOptions();
+                    userDropdownList.style.display = 'block';
+                    applyFilters();
+                });
                 filterDateInput.addEventListener('change', applyFilters);
             </script>
         </body></html>
     `);
+});
+
+app.post('/admin-change-password', async (req, res) => {
+    const adminName = req.query.admin;
+    const adminUser = await verifyAdmin(adminName);
+    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+
+    const { targetUser, newPassword } = req.body;
+    if (!targetUser || !newPassword || !newPassword.trim()) {
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&err=${encodeURIComponent('Mật khẩu mới không được để trống!')}`);
+    }
+
+    const targetDoc = await User.findOne({ username: targetUser });
+    if (!targetDoc) {
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&err=${encodeURIComponent('Không tìm thấy tài khoản!')}`);
+    }
+
+    targetDoc.password = newPassword.trim();
+    await targetDoc.save();
+    await sendToSignal(`🛡️ **[ADMIN: ${adminName}] ĐÃ ĐỔI MẬT KHẨU CHO TÀI KHOẢN [${targetUser}]**`);
+
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&msg=${encodeURIComponent(`✅ Đã đổi mật khẩu cho tài khoản ${targetUser}!`)}`);
+});
+
+app.get('/admin-delete-user', async (req, res) => {
+    const adminName = req.query.admin;
+    const targetUser = req.query.target;
+    const adminUser = await verifyAdmin(adminName);
+    if (!adminUser) return res.redirect('/login?err=Bạn+không+có+quyền+Admin!');
+
+    if (!targetUser || targetUser === adminName) {
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&err=${encodeURIComponent('Không thể xóa tài khoản Admin đang đăng nhập!')}`);
+    }
+
+    const deleted = await User.findOneAndDelete({ username: targetUser });
+    if (deleted) {
+        await sendToSignal(`🛡️ **[ADMIN: ${adminName}] ĐÃ XÓA TÀI KHOẢN [${targetUser}]**`);
+        return res.redirect(`/admin?admin=${encodeURIComponent(adminName)}&msg=${encodeURIComponent(`🗑️ Đã xóa tài khoản ${targetUser}!`)}`);
+    }
+
+    res.redirect(`/admin?admin=${encodeURIComponent(adminName)}`);
 });
 
 app.post('/admin-add', async (req, res) => {
@@ -665,7 +769,7 @@ app.get('/edit', async (req, res) => {
             .form-group { margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
             label { font-size: 14px; color: #333; flex: 2; }
             input[type="number"] { width: 70px; padding: 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; flex: 1; text-align: center; }
-            button { width: 100%; background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; font-size: 16px; font-weight: bold; margin-top: 20px; cursor: pointer; }
+            button { width: 100%; background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; font-size: 16px; font-weight:bold; margin-top: 20px; cursor: pointer; }
             .back-link { display: block; text-align: center; margin-top: 15px; color: #2980b9; text-decoration: none; font-size: 14px; font-weight: bold; }
         </style></head>
         <body>
@@ -986,7 +1090,6 @@ bot.on('text', async (ctx) => {
 app.listen(PORT, async () => {
     console.log(`Web App đang chạy trên cổng ${PORT}`);
 
-    // Tự động phát hiện URL thật của app trên Render
     const domain = process.env.RENDER_EXTERNAL_URL || 'https://telenodesig-8o00.onrender.com';
     const webhookUrl = `${domain}${WEBHOOK_PATH}`;
 
