@@ -390,6 +390,7 @@ app.get('/admin', async (req, res) => {
         allUsers.map(u => ({
             username: u.username,
             role: u.role || 'user',
+            score: (u.history || []).reduce((sum, item) => sum + (item.score || 0), 0),
             history: (u.history || []).map((item, idx) => ({
                 index: idx,
                 date: item.date,
@@ -400,53 +401,11 @@ app.get('/admin', async (req, res) => {
 
     let totalSystemScore = 0;
     let totalReportsCount = 0;
-
-    const userSectionsHtml = allUsers.map(u => {
+    allUsers.forEach(u => {
         const uHistory = u.history || [];
-        const uScore = uHistory.reduce((sum, item) => sum + (item.score || 0), 0);
-        totalSystemScore += uScore;
+        totalSystemScore += uHistory.reduce((sum, item) => sum + (item.score || 0), 0);
         totalReportsCount += uHistory.length;
-
-        const rowsHtml = uHistory.length
-            ? uHistory.map((item, idx) => `
-                <tr>
-                    <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">${item.date}</td>
-                    <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#27ae60;">+${item.score} đ</td>
-                    <td style="padding:8px;border-bottom:1px solid #eee;text-align:center;">
-                        <a href="/admin-edit?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&target=${encodeURIComponent(u.username)}&index=${idx}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
-                        <a href="/admin-delete?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&target=${encodeURIComponent(u.username)}&index=${idx}" onclick="return confirm('Xóa báo cáo ngày ${item.date} của ${u.username}?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
-                    </td>
-                </tr>
-            `).join('')
-            : `<tr><td colspan="3" style="text-align:center;padding:10px;color:#777;">Chưa có báo cáo</td></tr>`;
-
-        const deleteUserBtn = u.username === adminName
-            ? `<span style="font-size:11px;color:#888;background:#edf2f7;padding:4px 8px;border-radius:4px;">Tài khoản hiện tại</span>`
-            : `<a href="/admin-delete-user?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}&target=${encodeURIComponent(u.username)}" onclick="return confirm('XÓA VĨNH VIỄN tài khoản ${u.username} và toàn bộ báo cáo của tài khoản này?');" style="background:#c0392b;color:white;padding:5px 10px;text-decoration:none;border-radius:5px;font-size:12px;font-weight:bold;">🗑️ Xóa tài khoản</a>`;
-
-        return `
-            <div style="border:1px solid #dce4ec;border-radius:10px;padding:12px;margin-top:15px;background:#fafbfd;">
-                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-                    <span>👤 <b>${u.username}</b> ${u.role === 'admin' ? '<span style="background:#8e44ad;color:white;padding:2px 6px;border-radius:4px;font-size:11px;">ADMIN</span>' : ''}</span>
-                    <span style="font-weight:bold;color:#2980b9;">${uScore} điểm (${uHistory.length} ngày)</span>
-                </div>
-
-                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:#f1f5f9;padding:8px 10px;border-radius:7px;margin-bottom:10px;">
-                    <form action="/admin-change-password?admin=${encodeURIComponent(adminName)}&token=${encodeURIComponent(token)}" method="POST" style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px;margin:0;">
-                        <input type="hidden" name="targetUser" value="${u.username}">
-                        <input type="text" name="newPassword" placeholder="Mật khẩu mới..." required style="padding:5px 8px;border:1px solid #cbd5e0;border-radius:5px;font-size:12px;flex:1;min-width:110px;">
-                        <button type="submit" style="width:auto;margin:0;padding:5px 10px;font-size:12px;background:#2980b9;border-radius:5px;">🔑 Đổi MK</button>
-                    </form>
-                    <div>${deleteUserBtn}</div>
-                </div>
-
-                <table style="width:100%;border-collapse:collapse;font-size:13px;background:white;">
-                    <thead><tr style="background:#ecf0f1;"><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead>
-                    <tbody>${rowsHtml}</tbody>
-                </table>
-            </div>
-        `;
-    }).join('');
+    });
 
     const statusBanner = req.query.msg
         ? `<div style="background:#e8f8f5;border:1px solid #a3e4d7;color:#1e8449;padding:10px 12px;border-radius:8px;margin-bottom:15px;font-size:13px;font-weight:bold;text-align:center;">${decodeURIComponent(req.query.msg)}</div>`
@@ -459,26 +418,60 @@ app.get('/admin', async (req, res) => {
         <title>🌐 Chiến Dịch 60 Ngày - Bảng Điều Khiển Admin</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
         <style>
-            body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:15px}
-            .container{max-width:720px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}
-            h2,h3{text-align:center;color:#2c3e50}
-            .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}
-            .stats-box{background:#eaf2f8;border:1px solid #aed6f1;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}
-            .section-title{background:#2c3e50;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}
-            .form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
-            label{font-size:14px;color:#333;flex:2}
-            input[type="number"],input[type="date"],select{padding:6px;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1;text-align:center}
-            button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:15px;cursor:pointer}
+            body{font-family:Arial,sans-serif;background:#f4f6f9;margin:0;padding:12px}
+            .container{max-width:720px;margin:0 auto;background:white;padding:16px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1);box-sizing:border-box}
+            h2,h3{text-align:center;color:#2c3e50;margin-top:8px}
+            .top-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px;font-size:13px;background:#ecf0f1;padding:10px;border-radius:8px}
+            .stats-box{background:#eaf2f8;border:1px solid #aed6f1;padding:12px;border-radius:8px;text-align:center;margin-bottom:16px;font-size:14px}
+            .section-title{background:#2c3e50;color:white;padding:9px 12px;border-radius:6px;margin-top:22px;font-size:14px;font-weight:bold}
+            .form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+            label{font-size:14px;color:#333;flex:1.4}
+            input[type="number"],input[type="date"],select{padding:7px 8px;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1;min-width:0;box-sizing:border-box;text-align:center;background:white}
+            .submit-btn{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:15px;font-weight:bold;margin-top:14px;cursor:pointer}
 
-            .filter-card{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:15px;}
-            .filter-grid{display:flex;gap:10px;flex-wrap:wrap;}
-            .filter-item{flex:1;min-width:200px;}
-            .filter-item label{display:block;font-size:13px;font-weight:bold;margin-bottom:5px;color:#4a5568;}
-            .filter-input{width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;box-sizing:border-box;}
-            .live-results-box{margin-top:12px;background:white;border:1px solid #dbe2ea;border-radius:8px;padding:10px;}
-            .live-user-chip{display:inline-block;padding:4px 10px;margin:3px;border-radius:999px;font-size:12px;background:#edf2f7;color:#2d3748;cursor:pointer;border:1px solid transparent;}
-            .live-user-chip.active{background:#2980b9;color:white;font-weight:bold;}
-            .btn-reset{background:#718096;color:white;border:none;padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:bold;margin-top:10px;width:auto;}
+            .filter-card{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:12px;box-sizing:border-box}
+            .filter-grid{display:flex;gap:10px;flex-wrap:wrap}
+            .filter-item{flex:1;min-width:200px;position:relative}
+            .filter-item label{display:block;font-size:13px;font-weight:bold;margin-bottom:5px;color:#4a5568}
+            .filter-input{width:100%;padding:8px 10px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;box-sizing:border-box;background:white}
+
+            .search-dropdown{display:none;position:absolute;top:calc(100% + 2px);left:0;right:0;background:white;border:1px solid #90cdf4;border-radius:6px;box-shadow:0 8px 18px rgba(0,0,0,0.14);max-height:190px;overflow-y:auto;z-index:40}
+            .search-dropdown-item{padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center}
+            .search-dropdown-item:last-child{border-bottom:none}
+            .search-dropdown-item:hover{background:#ebf8ff}
+
+            .live-results-box{margin-top:12px;background:white;border:1px solid #dbe2ea;border-radius:8px;padding:10px;box-sizing:border-box}
+            .live-user-chip{display:inline-block;padding:5px 10px;margin:3px 4px 3px 0;border-radius:999px;font-size:12px;background:#edf2f7;color:#2d3748;cursor:pointer;border:1px solid #cbd5e0}
+            .live-user-chip.active{background:#2980b9;color:white;border-color:#2980b9;font-weight:bold}
+            .btn-reset{background:#718096;color:white;border:none;padding:7px 12px;border-radius:6px;font-size:13px;cursor:pointer;font-weight:bold}
+
+            .responsive-table{width:100%;border-collapse:collapse;font-size:13px}
+            .responsive-table th,.responsive-table td{padding:8px 6px;border-bottom:1px solid #eee;text-align:center;vertical-align:middle}
+            .responsive-table th{background:#f1f5f9;color:#2d3748;font-size:12px}
+            .action-group{display:inline-flex;gap:5px;flex-wrap:wrap;justify-content:center}
+            .btn-edit{background:#f39c12;color:white;padding:4px 9px;text-decoration:none;border-radius:4px;font-size:12px;font-weight:bold;white-space:nowrap;display:inline-block}
+            .btn-del{background:#e74c3c;color:white;padding:4px 9px;text-decoration:none;border-radius:4px;font-size:12px;font-weight:bold;white-space:nowrap;display:inline-block}
+
+            .acc-row-card{border:1px solid #dce4ec;border-radius:10px;padding:12px;margin-top:10px;background:#fafbfd;box-sizing:border-box}
+            .acc-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+            .acc-meta{font-size:13px;font-weight:bold;color:#2980b9;white-space:nowrap}
+            .acc-tools{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;background:#f1f5f9;padding:8px;border-radius:7px;margin-top:8px}
+            .pw-form{display:flex;align-items:center;gap:6px;flex:1;min-width:200px;margin:0}
+            .pw-input{padding:6px 8px;border:1px solid #cbd5e0;border-radius:5px;font-size:12px;flex:1;min-width:95px;box-sizing:border-box;background:white}
+            .btn-pw{background:#2980b9;color:white;border:none;padding:6px 10px;border-radius:5px;font-size:12px;font-weight:bold;cursor:pointer;white-space:nowrap}
+            .btn-del-acc{background:#c0392b;color:white;padding:6px 10px;text-decoration:none;border-radius:5px;font-size:12px;font-weight:bold;white-space:nowrap;display:inline-block}
+            .btn-toggle-rep{background:#34495e;color:white;border:none;padding:5px 10px;border-radius:5px;font-size:12px;font-weight:bold;cursor:pointer;white-space:nowrap}
+            .acc-reports-panel{display:none;margin-top:10px;background:white;border:1px solid #e2e8f0;border-radius:8px;padding:8px;overflow-x:auto}
+            .acc-reports-panel.open{display:block}
+
+            @media (max-width: 480px) {
+                .container{padding:12px}
+                .form-group{flex-direction:column;align-items:stretch;gap:4px}
+                input[type="number"],input[type="date"],select{width:100%;flex:none}
+                .responsive-table{font-size:12px}
+                .responsive-table th,.responsive-table td{padding:7px 4px}
+                .btn-edit,.btn-del{padding:4px 7px;font-size:11px}
+            }
         </style></head>
         <body>
             <div class="container">
@@ -499,24 +492,25 @@ app.get('/admin', async (req, res) => {
                 <div class="filter-card">
                     <div style="font-size:14px;font-weight:bold;color:#2d3748;margin-bottom:8px;">🔍 BỘ LỌC VÀ TÌM KIẾM BÁO CÁO</div>
                     <div class="filter-grid">
-                        <div class="filter-item">
-                            <label>🔎 Tìm tên tài khoản:</label>
-                            <input type="text" id="searchUser" class="filter-input" placeholder="Gõ tên tài khoản để lọc..." autocomplete="off">
+                        <div class="filter-item" id="searchDropdownBox">
+                            <label>🔎 Tìm tên tài khoản (bấm để xổ danh sách):</label>
+                            <input type="text" id="searchUser" class="filter-input" placeholder="Gõ hoặc chọn tài khoản..." autocomplete="off" onfocus="showUserDropdown()">
+                            <div id="userDropdownMenu" class="search-dropdown"></div>
                         </div>
                         <div class="filter-item">
                             <label>📅 Lọc theo ngày báo cáo (để trống = mọi ngày):</label>
                             <input type="date" id="filterDate" class="filter-input">
                         </div>
                     </div>
-                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:8px;">
+                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:10px;">
                         <button type="button" class="btn-reset" onclick="resetFilters()">🔄 Xóa bộ lọc</button>
-                        <span id="filterStats" style="font-size:13px;color:#4a5568;font-style:italic;margin-top:10px;"></span>
+                        <span id="filterStats" style="font-size:13px;color:#4a5568;font-style:italic;"></span>
                     </div>
 
                     <div class="live-results-box">
-                        <div style="font-size:12px;font-weight:bold;color:#4a5568;margin-bottom:6px;">📋 DANH SÁCH TÀI KHOẢN & KẾT QUẢ LỌC NGAY BÊN DƯỚI:</div>
+                        <div style="font-size:12px;font-weight:bold;color:#4a5568;margin-bottom:6px;">📋 TÀI KHOẢN & KẾT QUẢ LỌC NGAY BÊN DƯỚI:</div>
                         <div id="liveUserChips" style="margin-bottom:8px;"></div>
-                        <div id="liveFilteredTable"></div>
+                        <div id="liveFilteredTable" style="overflow-x:auto;"></div>
                     </div>
                 </div>
 
@@ -541,13 +535,11 @@ app.get('/admin', async (req, res) => {
                     <div class="form-group"><label>Hữu Hiệu:</label><input type="number" name="huuHieu" value="0" min="0" required></div>
                     <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="0" min="0" required></div>
 
-                    <button type="submit">💾 Lưu Báo Cáo Cho Tài Khoản</button>
+                    <button type="submit" class="submit-btn">💾 Lưu Báo Cáo Cho Tài Khoản</button>
                 </form>
 
-                <div class="section-title" style="margin-top:30px;">📊 Toàn Bộ Tài Khoản & Báo Cáo</div>
-                <div id="usersListContainer">
-                    ${userSectionsHtml}
-                </div>
+                <div class="section-title" style="margin-top:28px;">📊 Danh Sách Tài Khoản (Bấm mở báo cáo khi cần)</div>
+                <div id="usersListContainer"></div>
             </div>
 
             ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
@@ -555,12 +547,51 @@ app.get('/admin', async (req, res) => {
                 const ADMIN_NAME = ${JSON.stringify(adminName)};
                 const SESSION_TOKEN = ${JSON.stringify(token)};
                 let ALL_USERS_DATA = ${serializedUsersJson};
+                const expandedUsers = new Set();
 
                 const searchUserInput = document.getElementById('searchUser');
                 const filterDateInput = document.getElementById('filterDate');
                 const filterStats = document.getElementById('filterStats');
+                const userDropdownMenu = document.getElementById('userDropdownMenu');
                 const liveUserChips = document.getElementById('liveUserChips');
                 const liveFilteredTable = document.getElementById('liveFilteredTable');
+                const usersListContainer = document.getElementById('usersListContainer');
+
+                function renderUserDropdownMenu() {
+                    const kw = searchUserInput.value.trim().toLowerCase();
+                    const list = ALL_USERS_DATA.filter(u => !kw || u.username.toLowerCase().includes(kw));
+
+                    let html = \`<div class="search-dropdown-item" onclick="pickUserFromDropdown('')"><span>✨ Tất cả tài khoản</span><span style="color:#718096;font-size:11px;">\${ALL_USERS_DATA.length}</span></div>\`;
+                    if (!list.length) {
+                        html += '<div style="padding:8px 10px;font-size:12px;color:#888;">Không tìm thấy tài khoản</div>';
+                    } else {
+                        html += list.map(u => \`
+                            <div class="search-dropdown-item" onclick="pickUserFromDropdown('\${u.username}')">
+                                <span>👤 <b>\${u.username}</b> \${u.role === 'admin' ? '<span style=\"background:#8e44ad;color:white;padding:1px 5px;border-radius:3px;font-size:10px;\">ADMIN</span>' : ''}</span>
+                                <span style="color:#2980b9;font-size:12px;font-weight:bold;">\${u.score} đ (\${u.history.length})</span>
+                            </div>
+                        \`).join('');
+                    }
+                    userDropdownMenu.innerHTML = html;
+                }
+
+                function showUserDropdown() {
+                    renderUserDropdownMenu();
+                    userDropdownMenu.style.display = 'block';
+                }
+
+                function pickUserFromDropdown(uname) {
+                    searchUserInput.value = uname;
+                    userDropdownMenu.style.display = 'none';
+                    renderLiveFilterSection();
+                }
+
+                document.addEventListener('click', (e) => {
+                    const box = document.getElementById('searchDropdownBox');
+                    if (box && !box.contains(e.target)) {
+                        userDropdownMenu.style.display = 'none';
+                    }
+                });
 
                 function pickChipUser(uname) {
                     if (searchUserInput.value.trim().toLowerCase() === uname.toLowerCase()) {
@@ -608,27 +639,99 @@ app.get('/admin', async (req, res) => {
 
                     const rowsHtml = matchedRows.map(r => \`
                         <tr>
-                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">\${r.username}</td>
-                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">\${r.date}</td>
-                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;color:#27ae60;">+\${r.score} đ</td>
-                            <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">
-                                <a href="/admin-edit?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" style="background:#f39c12;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;margin-right:4px;">Sửa</a>
-                                <a href="/admin-delete?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" onclick="return confirm('Xóa báo cáo ngày \${r.date} của \${r.username}?');" style="background:#e74c3c;color:white;padding:3px 7px;text-decoration:none;border-radius:4px;font-size:11px;">Xóa</a>
+                            <td style="font-weight:bold;">\${r.username}</td>
+                            <td>\${r.date}</td>
+                            <td style="font-weight:bold;color:#27ae60;white-space:nowrap;">+\${r.score} đ</td>
+                            <td>
+                                <div class="action-group">
+                                    <a href="/admin-edit?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" class="btn-edit">Sửa</a>
+                                    <a href="/admin-delete?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(r.username)}&index=\${r.index}" onclick="return confirm('Xóa báo cáo ngày \${r.date} của \${r.username}?');" class="btn-del">Xóa</a>
+                                </div>
                             </td>
                         </tr>
                     \`).join('');
 
                     liveFilteredTable.innerHTML = \`
-                        <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                            <thead><tr style="background:#f1f5f9;"><th>Tài khoản</th><th>Ngày</th><th>Điểm</th><th>Thao tác</th></tr></thead>
+                        <table class="responsive-table">
+                            <thead><tr><th>Tài khoản</th><th>Ngày</th><th>Điểm</th><th>Thao tác</th></tr></thead>
                             <tbody>\${rowsHtml}</tbody>
                         </table>
                     \`;
                 }
 
+                function toggleUserReportsPanel(uname) {
+                    if (expandedUsers.has(uname)) {
+                        expandedUsers.delete(uname);
+                    } else {
+                        expandedUsers.add(uname);
+                    }
+                    renderAccountsCompactList();
+                }
+
+                function renderAccountsCompactList() {
+                    if (!ALL_USERS_DATA.length) {
+                        usersListContainer.innerHTML = '<div style="text-align:center;padding:14px;color:#777;">Chưa có tài khoản nào.</div>';
+                        return;
+                    }
+
+                    usersListContainer.innerHTML = ALL_USERS_DATA.map(u => {
+                        const isOpen = expandedUsers.has(u.username);
+                        const delAccHtml = u.username === ADMIN_NAME
+                            ? '<span style="font-size:11px;color:#888;background:#e2e8f0;padding:5px 8px;border-radius:4px;">Tài khoản hiện tại</span>'
+                            : \`<a href="/admin-delete-user?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(u.username)}" onclick="return confirm('XÓA VĨNH VIỄN tài khoản \${u.username} và toàn bộ báo cáo của tài khoản này?');" class="btn-del-acc">🗑️ Xóa TK</a>\`;
+
+                        const reportRowsHtml = u.history.length
+                            ? u.history.map(item => \`
+                                <tr>
+                                    <td>\${item.date}</td>
+                                    <td style="font-weight:bold;color:#27ae60;white-space:nowrap;">+\${item.score} đ</td>
+                                    <td>
+                                        <div class="action-group">
+                                            <a href="/admin-edit?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(u.username)}&index=\${item.index}" class="btn-edit">Sửa</a>
+                                            <a href="/admin-delete?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}&target=\${encodeURIComponent(u.username)}&index=\${item.index}" onclick="return confirm('Xóa báo cáo ngày \${item.date} của \${u.username}?');" class="btn-del">Xóa</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            \`).join('')
+                            : '<tr><td colspan="3" style="text-align:center;padding:10px;color:#777;">Chưa có báo cáo</td></tr>';
+
+                        return \`
+                            <div class="acc-row-card">
+                                <div class="acc-header">
+                                    <div>
+                                        👤 <b>\${u.username}</b>
+                                        \${u.role === 'admin' ? '<span style="background:#8e44ad;color:white;padding:1px 6px;border-radius:4px;font-size:10px;margin-left:4px;">ADMIN</span>' : ''}
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                        <span class="acc-meta">\${u.score} đ (\${u.history.length} ngày)</span>
+                                        <button type="button" class="btn-toggle-rep" onclick="toggleUserReportsPanel('\${u.username}')">\${isOpen ? '🔼 Ẩn BC' : '🔽 Báo cáo'}</button>
+                                    </div>
+                                </div>
+
+                                <div class="acc-tools">
+                                    <form action="/admin-change-password?admin=\${encodeURIComponent(ADMIN_NAME)}&token=\${encodeURIComponent(SESSION_TOKEN)}" method="POST" class="pw-form">
+                                        <input type="hidden" name="targetUser" value="\${u.username}">
+                                        <input type="text" name="newPassword" placeholder="Mật khẩu mới..." required class="pw-input">
+                                        <button type="submit" class="btn-pw">🔑 Đổi MK</button>
+                                    </form>
+                                    <div>\${delAccHtml}</div>
+                                </div>
+
+                                <div class="acc-reports-panel \${isOpen ? 'open' : ''}">
+                                    <table class="responsive-table">
+                                        <thead><tr><th>Ngày</th><th>Điểm</th><th>Thao tác</th></tr></thead>
+                                        <tbody>\${reportRowsHtml}</tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        \`;
+                    }).join('');
+                }
+
                 function resetFilters() {
                     searchUserInput.value = '';
                     filterDateInput.value = '';
+                    userDropdownMenu.style.display = 'none';
                     renderLiveFilterSection();
                 }
 
@@ -647,12 +750,18 @@ app.get('/admin', async (req, res) => {
                         document.getElementById('adm-total-score').innerText = data.totalSystemScore + ' điểm';
                         ALL_USERS_DATA = data.users;
                         renderLiveFilterSection();
+                        renderAccountsCompactList();
                     } catch (e) {}
                 };
 
-                searchUserInput.addEventListener('input', renderLiveFilterSection);
+                searchUserInput.addEventListener('input', () => {
+                    renderUserDropdownMenu();
+                    userDropdownMenu.style.display = 'block';
+                    renderLiveFilterSection();
+                });
                 filterDateInput.addEventListener('change', renderLiveFilterSection);
                 renderLiveFilterSection();
+                renderAccountsCompactList();
                 setInterval(window.syncNow, 2500);
             </script>
         </body></html>
@@ -838,10 +947,12 @@ app.get('/', async (req, res) => {
     const defaultDateStr = now.toISOString().split('T')[0];
     let historyRows = history.map((item, index) => `
         <tr><td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">${item.date}</td>
-        <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;font-weight:bold;color:#27ae60;">+${item.score} đ</td>
+        <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;font-weight:bold;color:#27ae60;white-space:nowrap;">+${item.score} đ</td>
         <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">
-        <a href="/edit?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}&index=${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
-        <a href="/delete?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}&index=${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a></td></tr>
+        <div style="display:inline-flex;gap:5px;flex-wrap:wrap;justify-content:center;">
+        <a href="/edit?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}&index=${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;font-weight:bold;white-space:nowrap;">Sửa</a>
+        <a href="/delete?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}&index=${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;font-weight:bold;white-space:nowrap;">Xóa</a>
+        </div></td></tr>
     `).join('');
 
     const adminLink = user.role === 'admin'
@@ -852,7 +963,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - ${username}</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
-        <style>body{font-family:Arial;background:#f4f6f9;margin:0;padding:15px}.container{max-width:550px;margin:0 auto;background:white;padding:20px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1)}h2,h3{text-align:center;color:#2c3e50}.top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}.section-title{background:#34495e;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}.form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}label{font-size:14px;color:#333;flex:2}input[type="number"],input[type="date"]{width:70px;padding:6px;text-align:center;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:20px;cursor:pointer}.stats-box{background:#e8f8f5;border:1px solid #a3e4d7;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}th{background:#ecf0f1;padding:8px}</style></head>
+        <style>body{font-family:Arial;background:#f4f6f9;margin:0;padding:12px}.container{max-width:550px;margin:0 auto;background:white;padding:16px;border-radius:12px;box-shadow:0 4px 10px rgba(0,0,0,0.1);box-sizing:border-box}h2,h3{text-align:center;color:#2c3e50}.top-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:15px;font-size:14px;background:#ecf0f1;padding:10px;border-radius:8px}.section-title{background:#34495e;color:white;padding:8px 12px;border-radius:6px;margin-top:20px;font-size:15px}.form-group{margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px}label{font-size:14px;color:#333;flex:1.5}input[type="number"],input[type="date"]{padding:7px;text-align:center;border:1px solid #ccc;border-radius:6px;font-size:14px;flex:1;min-width:0;box-sizing:border-box}button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-size:16px;font-weight:bold;margin-top:20px;cursor:pointer}.stats-box{background:#e8f8f5;border:1px solid #a3e4d7;padding:12px;border-radius:8px;text-align:center;margin-bottom:20px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}th{background:#ecf0f1;padding:8px}@media(max-width:480px){.form-group{flex-direction:column;align-items:stretch;gap:4px}input[type="number"],input[type="date"]{width:100%;flex:none}table{font-size:12px}}</style></head>
         <body><div class="container"><div class="top-bar"><span>Xin chào, <b>${username}</b></span><div>${adminLink}<a href="/logout?token=${encodeURIComponent(token)}" style="color:#c0392b;text-decoration:none;font-weight:bold;">Đăng xuất</a></div></div>
         <h2>🚀 Quản Lý Chiến Dịch</h2><div class="stats-box">🏆 Tổng điểm tích lũy: <b id="total-score" style="color:#27ae60;font-size:18px;">${cumulativeScore} điểm</b></div>
         <form action="/submit-report?user=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}" method="POST">
@@ -872,7 +983,7 @@ app.get('/', async (req, res) => {
         <div class="form-group"><label>Kết trái:</label><input type="number" name="ketTrai" value="0" min="0" required></div>
         <button type="submit">📤 Gửi Báo Cáo</button></form>
         <div class="section-title" style="margin-top:30px;">📋 Lịch Sử Báo Cáo</div>
-        <table><thead><tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead><tbody id="history-rows">${historyRows.length ? historyRows : '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>'}</tbody></table></div>
+        <div style="overflow-x:auto;"><table><thead><tr><th>Ngày</th><th>Điểm</th><th>Thao Tác</th></tr></thead><tbody id="history-rows">${historyRows.length ? historyRows : '<tr><td colspan="3" style="text-align:center;padding:10px;">Chưa có dữ liệu</td></tr>'}</tbody></table></div></div>
 
         ${buildTabGuardScript(token, AWAY_TIMEOUT_MS)}
         <script>
@@ -899,10 +1010,12 @@ app.get('/', async (req, res) => {
                         tbody.innerHTML = data.history.map((item, index) => \`
                             <tr>
                                 <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">\${item.date}</td>
-                                <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;font-weight:bold;color:#27ae60;">+\${item.score} đ</td>
+                                <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;font-weight:bold;color:#27ae60;white-space:nowrap;">+\${item.score} đ</td>
                                 <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">
-                                    <a href="/edit?user=\${encodeURIComponent(CURR_USER)}&token=\${encodeURIComponent(CURR_TOKEN)}&index=\${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;margin-right:4px;">Sửa</a>
-                                    <a href="/delete?user=\${encodeURIComponent(CURR_USER)}&token=\${encodeURIComponent(CURR_TOKEN)}&index=\${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;">Xóa</a>
+                                    <div style="display:inline-flex;gap:5px;flex-wrap:wrap;justify-content:center;">
+                                    <a href="/edit?user=\${encodeURIComponent(CURR_USER)}&token=\${encodeURIComponent(CURR_TOKEN)}&index=\${index}" style="background:#f39c12;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;font-weight:bold;white-space:nowrap;">Sửa</a>
+                                    <a href="/delete?user=\${encodeURIComponent(CURR_USER)}&token=\${encodeURIComponent(CURR_TOKEN)}&index=\${index}" onclick="return confirm('Xóa ngày này?');" style="background:#e74c3c;color:white;padding:4px 8px;text-decoration:none;border-radius:4px;font-size:12px;font-weight:bold;white-space:nowrap;">Xóa</a>
+                                    </div>
                                 </td>
                             </tr>
                         \`).join('');
