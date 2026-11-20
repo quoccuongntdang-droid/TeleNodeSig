@@ -372,11 +372,84 @@ app.get('/login', (req, res) => {
         <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>🌐 Chiến Dịch 60 Ngày - Đăng Nhập</title>
         <link rel="icon" href="${FAVICON_URL}" type="image/jpeg">
-        <style>body{font-family:Arial;background:#f4f6f9;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:15px;box-sizing:border-box}.card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}h2{text-align:center;color:#2c3e50;margin-bottom:20px}input{width:100%;padding:10px;margin:10px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}button{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px}.error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}.notice{color:#27ae60;text-align:center;font-size:13px;margin-bottom:10px}</style></head>
+        <style>
+            body{font-family:Arial,sans-serif;background:#f4f6f9;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:15px;box-sizing:border-box}
+            .card{background:white;padding:25px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:380px;box-sizing:border-box}
+            h2{text-align:center;color:#2c3e50;margin-top:0;margin-bottom:20px}
+            input[type="text"],input[type="password"]{width:100%;padding:10px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;font-size:14px}
+            .field-wrap{margin:10px 0}
+            .pw-box{position:relative;display:flex;align-items:center}
+            .pw-box input{padding-right:44px}
+            .toggle-pw{position:absolute;right:8px;background:transparent;border:none;color:#4a5568;font-size:13px;font-weight:bold;cursor:pointer;padding:4px 6px;margin:0;width:auto}
+            .remember-row{display:flex;align-items:center;gap:8px;margin:10px 0 6px 0;font-size:13px;color:#2d3748;cursor:pointer}
+            .remember-row input[type="checkbox"]{width:16px;height:16px;margin:0;cursor:pointer}
+            button[type="submit"]{width:100%;background:#2980b9;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:10px;font-size:15px}
+            .error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px}
+            .notice{color:#27ae60;text-align:center;font-size:13px;margin-bottom:10px}
+        </style></head>
         <body><div class="card"><h2>🔐 Đăng Nhập</h2>${req.query.msg ? `<div class="notice">${req.query.msg}</div>` : ''}${req.query.err ? `<div class="error">${req.query.err}</div>` : ''}
-        <form action="/auth-login" method="POST"><input type="text" name="username" placeholder="Tên đăng nhập" required><input type="password" name="password" placeholder="Mật khẩu" required><button type="submit">Đăng Nhập</button></form>
+        <form id="loginForm" action="/auth-login" method="POST" autocomplete="on">
+            <div class="field-wrap">
+                <input type="text" id="loginUsername" name="username" placeholder="Tên đăng nhập" autocomplete="username" required>
+            </div>
+            <div class="field-wrap pw-box">
+                <input type="password" id="loginPassword" name="password" placeholder="Mật khẩu" autocomplete="current-password" required>
+                <button type="button" class="toggle-pw" id="toggleLoginPw" onclick="togglePassword('loginPassword', 'toggleLoginPw')">Hiện</button>
+            </div>
+            <label class="remember-row" for="rememberLogin">
+                <input type="checkbox" id="rememberLogin" name="remember" checked>
+                <span>Lưu thông tin đăng nhập cho lần sau</span>
+            </label>
+            <button type="submit">Đăng Nhập</button>
+        </form>
         <div style="display:flex;justify-content:space-between;margin-top:15px;font-size:13px;"><a href="/register">Đăng ký</a><a href="/forgot">Quên mật khẩu?</a></div></div>
-        <script>sessionStorage.removeItem('cd60_tab_token'); sessionStorage.removeItem('cd60_tab_hidden_at');</script>
+        <script>
+            sessionStorage.removeItem('cd60_tab_token');
+            sessionStorage.removeItem('cd60_tab_hidden_at');
+
+            const SAVED_CREDS_KEY = 'cd60_saved_login';
+
+            function togglePassword(inputId, btnId) {
+                const inp = document.getElementById(inputId);
+                const btn = document.getElementById(btnId);
+                if (!inp || !btn) return;
+                if (inp.type === 'password') {
+                    inp.type = 'text';
+                    btn.textContent = 'Ẩn';
+                } else {
+                    inp.type = 'password';
+                    btn.textContent = 'Hiện';
+                }
+            }
+
+            (function loadSavedLogin() {
+                try {
+                    const raw = localStorage.getItem(SAVED_CREDS_KEY);
+                    if (!raw) return;
+                    const parsed = JSON.parse(raw);
+                    if (parsed && parsed.username) {
+                        document.getElementById('loginUsername').value = parsed.username;
+                    }
+                    if (parsed && parsed.password) {
+                        document.getElementById('loginPassword').value = parsed.password;
+                    }
+                    document.getElementById('rememberLogin').checked = true;
+                } catch (e) {}
+            })();
+
+            document.getElementById('loginForm').addEventListener('submit', function() {
+                const remember = document.getElementById('rememberLogin').checked;
+                const uname = document.getElementById('loginUsername').value.trim();
+                const pw = document.getElementById('loginPassword').value;
+                try {
+                    if (remember && uname) {
+                        localStorage.setItem(SAVED_CREDS_KEY, JSON.stringify({ username: uname, password: pw }));
+                    } else {
+                        localStorage.removeItem(SAVED_CREDS_KEY);
+                    }
+                } catch (e) {}
+            });
+        </script>
         </body></html>
     `);
 });
@@ -408,16 +481,22 @@ app.get('/register', (req, res) => {
             .card{background:white;padding:24px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:440px;box-sizing:border-box}
             h2{text-align:center;color:#2c3e50;margin-top:0;margin-bottom:16px}
             input,select{width:100%;padding:10px;margin:6px 0;border:1px solid #cbd5e0;border-radius:6px;box-sizing:border-box;font-size:14px;background:white}
+            .pw-box{position:relative;display:flex;align-items:center;margin:6px 0}
+            .pw-box input{margin:0;padding-right:44px}
+            .toggle-pw{position:absolute;right:8px;background:transparent;border:none;color:#4a5568;font-size:13px;font-weight:bold;cursor:pointer;padding:4px 6px;margin:0;width:auto}
             .hint{font-size:12px;color:#4a5568;background:#f8fafc;border-left:3px solid #2980b9;padding:6px 10px;border-radius:4px;margin:4px 0 10px 0;line-height:1.4}
             .q-box{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:10px}
             .q-title{font-size:13px;font-weight:bold;color:#2d3748;margin-bottom:4px}
-            button{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:14px;font-size:15px}
+            button[type="submit"]{width:100%;background:#27ae60;color:white;border:none;padding:12px;border-radius:6px;font-weight:bold;cursor:pointer;margin-top:14px;font-size:15px}
             .error{color:#e74c3c;text-align:center;font-size:13px;margin-bottom:10px;font-weight:bold}
         </style></head>
         <body><div class="card"><h2>📝 Đăng Ký</h2>${req.query.err ? `<div class="error">${decodeURIComponent(req.query.err)}</div>` : ''}
-        <form id="regForm" action="/auth-register" method="POST">
-            <input type="text" name="username" placeholder="Tên đăng nhập" required>
-            <input type="password" id="regPassword" name="password" placeholder="Mật khẩu" required>
+        <form id="regForm" action="/auth-register" method="POST" autocomplete="on">
+            <input type="text" name="username" placeholder="Tên đăng nhập" autocomplete="username" required>
+            <div class="pw-box">
+                <input type="password" id="regPassword" name="password" placeholder="Mật khẩu" autocomplete="new-password" required>
+                <button type="button" class="toggle-pw" id="toggleRegPw" onclick="togglePassword('regPassword', 'toggleRegPw')">Hiện</button>
+            </div>
             <div class="hint">🔒 ${PASSWORD_RULE_TEXT}</div>
 
             <div class="q-box">
@@ -445,6 +524,19 @@ app.get('/register', (req, res) => {
         <script>
             const ALL_QUESTIONS = ${questionsJson};
             const selects = [document.getElementById('q1'), document.getElementById('q2'), document.getElementById('q3')];
+
+            function togglePassword(inputId, btnId) {
+                const inp = document.getElementById(inputId);
+                const btn = document.getElementById(btnId);
+                if (!inp || !btn) return;
+                if (inp.type === 'password') {
+                    inp.type = 'text';
+                    btn.textContent = 'Ẩn';
+                } else {
+                    inp.type = 'password';
+                    btn.textContent = 'Hiện';
+                }
+            }
 
             function initSelects() {
                 selects.forEach((sel, idx) => {
@@ -549,6 +641,9 @@ app.get('/forgot', (req, res) => {
             .card{background:white;padding:24px;border-radius:12px;box-shadow:0 4px 15px rgba(0,0,0,0.1);width:100%;max-width:440px;box-sizing:border-box}
             h2{text-align:center;color:#2c3e50;margin-top:0;margin-bottom:16px}
             input{width:100%;padding:10px;margin:6px 0;border:1px solid #cbd5e0;border-radius:6px;box-sizing:border-box;font-size:14px}
+            .pw-box{position:relative;display:flex;align-items:center;margin-top:12px;margin-bottom:6px}
+            .pw-box input{margin:0;padding-right:44px}
+            .toggle-pw{position:absolute;right:8px;background:transparent;border:none;color:#4a5568;font-size:13px;font-weight:bold;cursor:pointer;padding:4px 6px;margin:0;width:auto}
             .row-inline{display:flex;gap:8px;align-items:center}
             .btn-load{width:auto;background:#2980b9;color:white;border:none;padding:10px 12px;border-radius:6px;font-weight:bold;cursor:pointer;white-space:nowrap;margin:6px 0}
             .q-item{background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:10px}
@@ -580,13 +675,29 @@ app.get('/forgot', (req, res) => {
                 </div>
             </div>
 
-            <input type="password" id="fgNewPass" name="newPassword" placeholder="Mật khẩu mới" required style="margin-top:12px;">
+            <div class="pw-box">
+                <input type="password" id="fgNewPass" name="newPassword" placeholder="Mật khẩu mới" autocomplete="new-password" required>
+                <button type="button" class="toggle-pw" id="toggleFgPw" onclick="togglePassword('fgNewPass', 'toggleFgPw')">Hiện</button>
+            </div>
             <div class="hint">🔒 ${PASSWORD_RULE_TEXT}</div>
             <button type="submit">Đổi Mật Khẩu</button>
         </form>
         <a href="/login" style="display:block;text-align:center;margin-top:15px;color:#2980b9;text-decoration:none;font-size:13px;">Quay lại</a></div>
 
         <script>
+            function togglePassword(inputId, btnId) {
+                const inp = document.getElementById(inputId);
+                const btn = document.getElementById(btnId);
+                if (!inp || !btn) return;
+                if (inp.type === 'password') {
+                    inp.type = 'text';
+                    btn.textContent = 'Ẩn';
+                } else {
+                    inp.type = 'password';
+                    btn.textContent = 'Hiện';
+                }
+            }
+
             async function loadSecurityQuestions() {
                 const uname = document.getElementById('fgUsername').value.trim();
                 const statusEl = document.getElementById('fgStatus');
