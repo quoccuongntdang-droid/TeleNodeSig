@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const FAVICON_URL = 'https://ahnsahnghong.com/wp-content/uploads/2021/07/church-of-god-established-by-ahnsahnghong.jpg';
-const BOT_TOKEN = '9115484646:AAHC5Cf_2jEm_jf0iuz7ccwZv3Hgm9Uu80E';
+const BOT_TOKEN = '9200957596:AAEvP_-ndBh2yubfLcekN21r0lduhJ-Zugs';
 const WEBHOOK_PATH = '/webhook/telegraf';
 
 // Cấu hình gửi báo cáo vào nhóm Signal qua Signal CLI REST API
